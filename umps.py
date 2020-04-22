@@ -1,7 +1,5 @@
-import numpy, torch
+import torch
 import tensornetwork as tn
-
-from tensornetwork import FiniteMPS
 
 from typing import List
 
@@ -38,49 +36,32 @@ class UMPS(torch.nn.Module):
         self.alpha = torch.randn(bond_dim)
         self.omega = torch.randn(bond_dim)
 
-        self.label_core = torch.randn(bond_dim,feature_dim,bond_dim)
+        self.output_core = torch.randn(bond_dim,output_dim,bond_dim)
 
     def forward(self, inputs: List[torch.Tensor]):
-        if self.output_dim == 0:
-            input_len = len(inputs)
-            input_list = [tn.Node(vect) for vect in inputs]
-            node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
+        
+        input_len = len(inputs)
+        input_list = [tn.Node(vect) for vect in inputs]
+    
+        input_node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
+        output_node = tn.Node(self.output_core) 
+
+        if self.output_dim > 0:
+            #add output node at the center of the input nodes
+            node_list = input_node_list.copy()
+            node_list.insert(input_len//2, output_node)
+        elif self.output_dim == 0:
+            node_list = input_node_list
 
         #connect tensor cores
-        for i in range(input_len-1):
+        for i in range(len(node_list)-1):
             node_list[i][2]^node_list[i+1][0]
 
         #connect the alpha and omega nodes to the first and last nodes
         tn.Node(self.alpha)[0]^node_list[0][0]
-        tn.Node(self.omega)[0]^node_list[input_len-1][2]
+        tn.Node(self.omega)[0]^node_list[len(node_list)-1][2]
 
-        return evaluate_input(node_list, input_list).tensor
-
-    def forward_old(self, inputs: List[torch.Tensor]):
-        if self.output_dim == 0:
-            input_len = len(inputs)
-            input_list = [tn.Node(vect) for vect in inputs]
-            core_list = [tn.Node(self.tensor_core) for i in range(input_len)]
-
-            #connect a core node with the next core node and with its input node
-            for i in range(input_len-1):
-                core_list[i][2]^core_list[i+1][0]
-                core_list[i][1]^input_list[i][0]
-
-            #connect the last core node with its input node
-            core_list[input_len-1][1]^input_list[input_len-1][0]
-
-            #connect the alpha and omega nodes to the first and last nodes
-            tn.Node(self.alpha)[0]^core_list[0][0]
-            tn.Node(self.omega)[0]^core_list[input_len-1][2]
-
-            #contracts the network
-            net = tn.reachable(core_list[0])
-            contracted_node = tn.contractors.auto(net)
-
-            return contracted_node.tensor
-        elif output_dim>0:
-            return
+        return evaluate_input(input_node_list, input_list).tensor
 
 def evaluate_input(node_list, input_list):
     """
@@ -186,7 +167,9 @@ def batch_node(num_inputs, batch_dim):
 
 if __name__=='__main__':
 
-    mps = UMPS(2,2)
+    mps = UMPS(feature_dim = 2,bond_dim = 2)
     x = [torch.rand(2,2) for i in range(8)]
     print(mps.forward(x))
-    
+
+    mps = UMPS(feature_dim = 2,bond_dim = 2, output_dim= 2)
+    print(mps.forward(x))    
