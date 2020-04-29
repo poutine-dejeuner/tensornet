@@ -20,7 +20,7 @@ def generate_cosine_dataset(n_samples, min_len, max_len, num_frequencies=3):
 
     all_factors = torch.rand(size=(n_samples, num_frequencies, 3))
 
-    # Generate a coside for each sample
+    # Generate a cosine for each sample
     for ii in range(n_samples):
         this_len = all_len[ii]
         
@@ -70,8 +70,11 @@ def generate_cosine_dataset(n_samples, min_len, max_len, num_frequencies=3):
 
 if __name__ == "__main__":
     torch.random.manual_seed(111)
-    df = generate_cosine_dataset(n_samples=10000, min_len=30, max_len=30, num_frequencies=3)
-    df.to_csv('data/cosine_dataset_len30.csv', index=False)
+    min_len = 30
+    max_len = 30
+    num_frequencies=3
+    df = generate_cosine_dataset(n_samples=10000, min_len=min_len, max_len=max_len, num_frequencies=num_frequencies)
+    df.to_csv(f'data/cosine_dataset_len-{min_len}-{max_len}_num-freq-{num_frequencies}.csv', index=False)
     print(df)
 
     print('Done!')
