@@ -1,12 +1,15 @@
 import torch
 import tensornetwork as tn
+import pytorch_lightning as pl
 
+import torch.nn.functional as F
 from typing import List
+from utils import evaluate_input, batch_node
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
 
-class UMPS(torch.nn.Module):
+class UMPS(pl.LightningModule):
 
     def __init__(self, 
                 feature_dim: int, 
@@ -24,29 +27,59 @@ class UMPS(torch.nn.Module):
 
         Returns:
             contracted_node: Tensor resulting in the contraction of the network.
+            If using batch inputs, the result is tensor of dimension 
+            (output_dim, batch_dim)
         """
 
-        super(torch.nn.Module,self).__init__()
+        super().__init__()
 
         self.feature_dim = feature_dim
         self.output_dim = output_dim
         self.bond_dim = bond_dim
+        self.alpha = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
+        self.omega = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
+        self.output_core = torch.nn.Parameter(torch.randn(bond_dim,output_dim,bond_dim, 
+                                                                requires_grad = True))
 
-        self.tensor_core = torch.randn(bond_dim,feature_dim,bond_dim)
-        self.alpha = torch.randn(bond_dim)
-        self.omega = torch.randn(bond_dim)
+        #The tensor core of the UMPS is initialized. A second tensor eye is 
+        #constructed and concatenated to tensor_core to construct the batch_core.
+        #The point of batch core is that when contracted with a padding vector as
+        #input the resulting matrix is the identity.
+        tensor_core = torch.nn.Parameter(torch.randn(bond_dim,feature_dim,bond_dim, 
+                                                                requires_grad = True))
+        eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
+        batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
+        batch_core[:, 0, :] = eye
+        batch_core[:, 1:, :] = tensor_core
+        self.tensor_core = [tensor_core, batch_core]
+        self.register_parameter('tensor core', tensor_core)
+        self.register_parameter('output core', self.output_core)
+        self.register_parameter('alpha vector', self.alpha)
+        self.register_parameter('omega vector', self.omega)
 
-        self.output_core = torch.randn(bond_dim,output_dim,bond_dim)
+    def forward(self, inputs: torch.Tensor):
+        """
+        Takes a batch input tensor, computes the number of inputs, creates a UMPS
+        of length length equal to the number of inputs, connects the input nodes
+        to the corresponding tensor nodes and returns the resulting contracted tensor.
 
-    def forward(self, inputs: List[torch.Tensor]):
+        Args:
+            inputs:     A torch tensor of dimensions (batch_dim, input_len, feature_dim)
         
-        input_len = len(inputs)
-        input_list = [tn.Node(vect) for vect in inputs]
-    
-        input_node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
-        output_node = tn.Node(self.output_core) 
+        Returns:        A torch tensor of dimensions (batch_dim, output_dim)
+        """
+
+        input_len = inputs.size(1)
+        has_batch = inputs.size(0) > 1
+
+        #splice the inputs tensor in the input_len dimension
+        input_list = [inputs.select(1,i) for i in range(input_len)]
+        input_list = [tn.Node(vect) for vect in input_list]
+        input_node_list = [tn.Node(self.tensor_core[has_batch]) for i in range(input_len)]
 
         if self.output_dim > 0:
+            output_node = tn.Node(self.output_core, name = 'output') 
+
             #add output node at the center of the input nodes
             node_list = input_node_list.copy()
             node_list.insert(input_len//2, output_node)
@@ -58,118 +91,36 @@ class UMPS(torch.nn.Module):
             node_list[i][2]^node_list[i+1][0]
 
         #connect the alpha and omega nodes to the first and last nodes
-        tn.Node(self.alpha)[0]^node_list[0][0]
-        tn.Node(self.omega)[0]^node_list[len(node_list)-1][2]
+        tn.Node(self.alpha, name = 'alpha')[0]^node_list[0][0]
+        tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
 
         return evaluate_input(input_node_list, input_list).tensor
 
-def evaluate_input(node_list, input_list):
-    """
-    Contract input vectors with tensor network to get scalar output
-​
-    Args:
-        node_list:   List of nodes with dangling edges of a tensor network
-        input_list:  List of inputs for each of the nodes in node_list.
-                     When processing a batch of inputs, a list of matrices 
-                     with shapes (batch_dim, input_dim_i) or a single 
-                     tensor with shape (num_cores, batch_dim, input_dim)
-                     can be specified
-​
-    Returns:
-        closed_list: List of tensors that encodes the closed tensor network
-    """
-    num_cores = len(node_list)
-    assert len(input_list) == num_cores
-    assert len(set(len(inp.shape) for inp in input_list)) == 1
+    def train_dataloader(self, batch_size):
+        num_workers = os.cpu_count()
+        train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
+                                        sampler=train_sampler, num_workers=num_workers )
+        return train_loader
 
-    # Get batch information about our input
-    input_shape = input_list[0].shape
-    has_batch = len(input_shape) == 2
-    assert len(input_shape) in (1, 2)
-    if has_batch: 
-        batch_dim = input_shape[0]
-        assert all(i.shape[0] == batch_dim for i in input_list)
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=0)
 
-        # Generate copy node for dealing with batch dims
-        batch_edges = batch_node(num_cores, batch_dim)
-        assert len(batch_edges) == num_cores + 1
-
-    # Go through and contract all inputs with corresponding cores
-    for i, node, inp in zip(range(num_cores), node_list, input_list):
-        inp_node = tn.Node(inp)
-        node[1] ^ inp_node[int(has_batch)]
-
-        # Explicitly contract batch indices together if we need that
-        if has_batch:
-            inp_node[0] ^ batch_edges[i]
-    
-    contractor = tn.contractors.auto
-
-    return contractor(tn.reachable(node_list))            
-
-def batch_node(num_inputs, batch_dim):
-    """
-    Return a network of small CopyNodes which emulates a large CopyNode
-    ​
-    This network is used for reproducing the standard batch functionality 
-    available in PyTorch, and requires connecting the `num_inputs` edges
-    returned by batch_node to the respective batch indices of our inputs.
-    The sole remaining free edge will then give the batch index of 
-    whatever contraction occurs later with the input.
-    ​
-    Args:
-        num_inputs: The number of batch indices to contract together
-        batch_dim:  The batch dimension we intend to reproduce
-    ​
-    Returns:
-        edge_list:  List of edges of our composite CopyNode object
-    """
-    # For small numbers of edges, just use a single CopyNode. Every pair of 
-    # input nodes will be connected to a copy node with 3 edges thus reducing
-    # the number of free edges by one each times and this process is repeated 
-    # iteratively until only one free edge remains.
-    num_edges = num_inputs + 1
-    if num_edges < 4:
-        node = tn.CopyNode(rank=num_edges, dimension=batch_dim)
-        return node.get_all_edges()
-    
-    # Initialize list of free edges with output of trivial identity mats
-    input_node = tn.Node(torch.eye(batch_dim))
-    edge_list, dummy_list = zip(*[input_node.copy().get_all_edges() 
-                                    for _ in range(num_edges)])
-    
-    # Iteratively contract dummy edges until we have less than 4
-    dummy_len = len(dummy_list)
-    while dummy_len > 4:
-        odd = dummy_len % 2 == 1
-        half_len = dummy_len // 2
-    
-        # Apply third order tensor to contract two dummy indices together
-        temp_list = []
-        for i in range(half_len):
-            temp_node = tn.CopyNode(rank=3, dimension=batch_dim)
-            temp_node[1] ^ dummy_list[2 * i]
-            temp_node[2] ^ dummy_list[2 * i + 1]
-            temp_list.append(temp_node[0])
-        if odd:
-            temp_list.append(dummy_list[-1])
-    
-        dummy_list = temp_list
-        dummy_len = len(dummy_list)
-    
-    # Contract the last dummy indices together
-    last_node = tn.CopyNode(rank=dummy_len, dimension=batch_dim)
-    [last_node[i] ^ dummy_list[i] for i in range(dummy_len)]
-    
-    return edge_list
-
-#TODO: torch.register_parameters?
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        predictions = self(x)
+        loss = F.mse_loss(predictions,y)
+        mae = F.l1_loss(x,y)
+        self.logger.summary.scalar('MSE loss', loss)
+        self.logger.summary.scalar('MAE', mae)
+        return loss
 
 if __name__=='__main__':
 
-    mps = UMPS(feature_dim = 2,bond_dim = 2)
-    x = [torch.rand(2,2) for i in range(8)]
-    print(mps.forward(x))
+    from dataset import MolDataset
+    import os
 
-    mps = UMPS(feature_dim = 2,bond_dim = 2, output_dim= 2)
-    print(mps.forward(x))    
+    filedir = os.path.dirname(os.path.realpath(__file__))
+    dataset = MolDataset(os.path.join(filedir,'qm9.csv'))
+    inputs = dataset.__getitem__(4)
+    mps = UMPS(feature_dim = 41, bond_dim = 100)
+    print(mps(inputs[0]))
