@@ -2,3 +2,7 @@
 .vscode/
 
 *.code-workspace
+
+lightning_logs/
+
+__pycache__/

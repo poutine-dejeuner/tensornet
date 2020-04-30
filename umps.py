@@ -1,6 +1,8 @@
+import os
 import torch
 import tensornetwork as tn
 import pytorch_lightning as pl
+from dataset import MolDataset
 
 import torch.nn.functional as F
 from typing import List
@@ -8,6 +10,7 @@ from utils import evaluate_input, batch_node
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
+
 
 class UMPS(pl.LightningModule):
 
@@ -36,6 +39,7 @@ class UMPS(pl.LightningModule):
         self.feature_dim = feature_dim
         self.output_dim = output_dim
         self.bond_dim = bond_dim
+        self._unused = torch.nn.LSTM(5, 5)
         self.alpha = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
         self.omega = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
         self.output_core = torch.nn.Parameter(torch.randn(bond_dim,output_dim,bond_dim, 
@@ -96,9 +100,14 @@ class UMPS(pl.LightningModule):
 
         return evaluate_input(input_node_list, input_list).tensor
 
-    def train_dataloader(self, batch_size):
+    def prepare_data(self):
+        filedir = os.path.dirname(os.path.realpath(__file__))
+        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
+        self.batch_size = 16
+
+    def train_dataloader(self):
         num_workers = os.cpu_count()
-        train_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
+        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size,
                                         sampler=train_sampler, num_workers=num_workers )
         return train_loader
 
@@ -115,9 +124,6 @@ class UMPS(pl.LightningModule):
         return loss
 
 if __name__=='__main__':
-
-    from dataset import MolDataset
-    import os
 
     filedir = os.path.dirname(os.path.realpath(__file__))
     dataset = MolDataset(os.path.join(filedir,'qm9.csv'))

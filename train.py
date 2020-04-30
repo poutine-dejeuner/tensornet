@@ -1,12 +1,22 @@
+import os
 import torch
 import pytorch_lightning
 from pytorch_lightning import Trainer
 from umps import UMPS
+from dataset import MolDataset
 
-if torch.cuda.is_available():
-    gpus = 1
-else:
-    gpus = None
-model = UMPS(feature_dim = 41, bond_dim = 100)
-trainer = Trainer(gpus=gpus)
-trainer.fit(model)
+
+
+if __name__ == "__main__":
+
+    if torch.cuda.is_available():
+        gpus = 1
+    else:
+        gpus = None
+    model = UMPS(feature_dim = 41, bond_dim = 100)
+    # filedir = os.path.dirname(os.path.realpath(__file__))
+    # dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
+    trainer = Trainer(gpus=gpus, min_epochs=10, max_epochs=20)
+    trainer.fit(model)
+
+
