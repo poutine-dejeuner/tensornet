@@ -93,7 +93,6 @@ class UMPS(pl.LightningModule):
 
         
         input_len = inputs.size(1)
-        has_batch = inputs.size(0) > 1
 
         #splice the inputs tensor in the input_len dimension
         input_list = [inputs.select(1,i) for i in range(input_len)]
@@ -124,7 +123,7 @@ class UMPS(pl.LightningModule):
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
         self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
-        self.batch_size = 4
+        self.batch_size = 1
         validation_split = .2
         random_seed = 42
 

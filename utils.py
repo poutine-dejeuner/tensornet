@@ -39,7 +39,7 @@ def evaluate_input(node_list, input_list):
 
     # Get batch information about our input
     input_shape = input_list[0].shape
-    has_batch = input_shape[0] > 1
+    has_batch = len(input_shape) == 2
     
     if has_batch: 
         batch_dim = input_shape[0]
@@ -48,6 +48,7 @@ def evaluate_input(node_list, input_list):
         # Generate copy node for dealing with batch dims
         batch_edges = batch_node(num_cores, batch_dim)
         assert len(batch_edges) == num_cores + 1
+        
 
     # Go through and contract all inputs with corresponding cores
     for i, node, inp in zip(range(num_cores), node_list, input_list):
