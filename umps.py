@@ -7,7 +7,7 @@ from dataset import MolDataset
 
 import torch.nn.functional as F
 from typing import List
-from utils import evaluate_input, batch_node, tensor_norm, random_tensor
+from utils import evaluate_input, batch_node, tensor_norm, create_tensor
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -46,25 +46,23 @@ class UMPS(pl.LightningModule):
         self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
         self.omega = torch.randn(bond_dim, requires_grad = True)
         self.omega = torch.nn.Parameter(self.omega / torch.norm(self.omega))
-        self.output_core = torch.randn(bond_dim,output_dim,bond_dim, requires_grad = True)
-        self.output_core = torch.nn.Parameter(self.output_core / tensor_norm(self.output_core))
+        self.output_core = create_tensor(bond_dim, feature_dim, bond_dim, opt='eye')
+        self.output_core.requires_grad = True
+        self.output_core = torch.nn.Parameter(self.output_core)
 
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
-        tensor_core = torch.randn(bond_dim,feature_dim,bond_dim, requires_grad = True)
-        tensor_core = torch.nn.Parameter(tensor_core / tensor_norm(tensor_core))
-
+        tensor_core = create_tensor(bond_dim, feature_dim, bond_dim, opt='eye')
+        tensor_core.requires_grad = True
+        torch.nn.Parameter(tensor_core)
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
         batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
         batch_core[:, 0, :] = eye
         batch_core[:, 1:, :] = tensor_core
-        self.tensor_core = [tensor_core, batch_core]
-        self.register_parameter('tensor core', tensor_core)
-        self.register_parameter('output core', self.output_core)
-        self.register_parameter('alpha vector', self.alpha)
-        self.register_parameter('omega vector', self.omega)
+        self.tensor_core = batch_core
+        
 
     def forward(self, inputs: torch.Tensor):
         """
