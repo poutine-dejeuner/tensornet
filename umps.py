@@ -1,12 +1,13 @@
 import os
 import torch
+import numpy as np
 import tensornetwork as tn
 import pytorch_lightning as pl
 from dataset import MolDataset
 
 import torch.nn.functional as F
 from typing import List
-from utils import evaluate_input, batch_node, tensor_norm
+from utils import evaluate_input, batch_node, tensor_norm, random_tensor
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -39,11 +40,12 @@ class UMPS(pl.LightningModule):
         self.feature_dim = feature_dim
         self.output_dim = output_dim
         self.bond_dim = bond_dim
+        #this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
         self._unused = torch.nn.LSTM(5, 5)
         self.alpha = torch.randn(bond_dim, requires_grad = True)
-        self.alpha = torch.nn.Parameter(self.alpha / tensor_norm(self.alpha))
+        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
         self.omega = torch.randn(bond_dim, requires_grad = True)
-        self.omega = torch.nn.Parameter(self.omega / tensor_norm(self.omega))
+        self.omega = torch.nn.Parameter(self.omega / torch.norm(self.omega))
         self.output_core = torch.randn(bond_dim,output_dim,bond_dim, requires_grad = True)
         self.output_core = torch.nn.Parameter(self.output_core / tensor_norm(self.output_core))
 
@@ -111,8 +113,22 @@ class UMPS(pl.LightningModule):
 
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
-        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
+        self.dataset = MolDataset(os.path.join(filedir, 'data','qm9.csv'))
         self.batch_size = 1
+        random_seed = 42
+        validation_split = .2
+
+        # Creating data indices for training and validation splits:
+        dataset_size = len(self.dataset)
+        indices = list(range(dataset_size))
+        split = int(np.floor(validation_split * dataset_size))
+        np.random.seed(random_seed)
+        np.random.shuffle(indices)
+        train_indices, val_indices = indices[split:], indices[:split]
+
+        # Creating data samplers and loaders:
+        self.train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_indices)
+        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
 
     def train_dataloader(self):
         num_workers = 1 #os.cpu_count()

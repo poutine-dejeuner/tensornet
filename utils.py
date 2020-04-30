@@ -1,6 +1,14 @@
 import torch
 import tensornetwork as tn
 
+def random_tensor(d1,d2,d3, std = 1e-8):
+    
+    ten = torch.eye(d1,d3)
+    ten = ten.expand(d1,d2,d3)
+    noise = torch.sqrt(std)*torch.randn(d1,d2,d3)
+    ten = ten + noise
+    return ten
+
 def evaluate_input(node_list, input_list):
     """
     Contract input vectors with tensor network to get scalar output
@@ -22,8 +30,8 @@ def evaluate_input(node_list, input_list):
 
     # Get batch information about our input
     input_shape = input_list[0].shape
-    has_batch = len(input_shape) == 2
-    assert len(input_shape) in (1, 2)
+    has_batch = input_shape[0] > 1
+    
     if has_batch: 
         batch_dim = input_shape[0]
         assert all(i.shape[0] == batch_dim for i in input_list)
