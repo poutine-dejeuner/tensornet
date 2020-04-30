@@ -112,3 +112,12 @@ def batch_node(num_inputs, batch_dim):
     [last_node[i] ^ dummy_list[i] for i in range(dummy_len)]
     
     return edge_list
+
+
+def tensor_norm(tensor):
+    
+    # Some simple solution that seems to not diverge
+    norm = torch.sqrt(torch.sum(tensor ** 2)) ** (1/tensor.ndim)
+
+    return norm
+

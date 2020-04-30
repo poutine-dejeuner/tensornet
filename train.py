@@ -9,11 +9,13 @@ from dataset import MolDataset
 
 if __name__ == "__main__":
 
+    torch.random.manual_seed(111)
+
     if torch.cuda.is_available():
         gpus = 1
     else:
         gpus = None
-    model = UMPS(feature_dim = 41, bond_dim = 100)
+    model = UMPS(feature_dim = 41, output_dim = 19, bond_dim = 100)
     # filedir = os.path.dirname(os.path.realpath(__file__))
     # dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
     trainer = Trainer(gpus=gpus, min_epochs=10, max_epochs=20)

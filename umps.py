@@ -6,7 +6,7 @@ from dataset import MolDataset
 
 import torch.nn.functional as F
 from typing import List
-from utils import evaluate_input, batch_node
+from utils import evaluate_input, batch_node, tensor_norm
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -40,17 +40,20 @@ class UMPS(pl.LightningModule):
         self.output_dim = output_dim
         self.bond_dim = bond_dim
         self._unused = torch.nn.LSTM(5, 5)
-        self.alpha = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
-        self.omega = torch.nn.Parameter(torch.randn(bond_dim, requires_grad = True))
-        self.output_core = torch.nn.Parameter(torch.randn(bond_dim,output_dim,bond_dim, 
-                                                                requires_grad = True))
+        self.alpha = torch.randn(bond_dim, requires_grad = True)
+        self.alpha = torch.nn.Parameter(self.alpha / tensor_norm(self.alpha))
+        self.omega = torch.randn(bond_dim, requires_grad = True)
+        self.omega = torch.nn.Parameter(self.omega / tensor_norm(self.omega))
+        self.output_core = torch.randn(bond_dim,output_dim,bond_dim, requires_grad = True)
+        self.output_core = torch.nn.Parameter(self.output_core / tensor_norm(self.output_core))
 
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
-        tensor_core = torch.nn.Parameter(torch.randn(bond_dim,feature_dim,bond_dim, 
-                                                                requires_grad = True))
+        tensor_core = torch.randn(bond_dim,feature_dim,bond_dim, requires_grad = True)
+        tensor_core = torch.nn.Parameter(tensor_core / tensor_norm(tensor_core))
+
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
         batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
         batch_core[:, 0, :] = eye
@@ -73,6 +76,10 @@ class UMPS(pl.LightningModule):
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         """
 
+        if inputs.ndim == 4:
+            print(f'WARNING INPUT SHAPE ADJUSTED {inputs.shape}')
+            inputs = inputs[0]
+        
         input_len = inputs.size(1)
         has_batch = inputs.size(0) > 1
 
@@ -98,17 +105,19 @@ class UMPS(pl.LightningModule):
         tn.Node(self.alpha, name = 'alpha')[0]^node_list[0][0]
         tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
 
-        return evaluate_input(input_node_list, input_list).tensor
+        output = evaluate_input(input_node_list, input_list).tensor
+
+        return output
 
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
         self.dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
-        self.batch_size = 16
+        self.batch_size = 1
 
     def train_dataloader(self):
-        num_workers = os.cpu_count()
-        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size,
-                                        sampler=train_sampler, num_workers=num_workers )
+        num_workers = 1 #os.cpu_count()
+        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
+                num_workers=num_workers, shuffle=True)
         return train_loader
 
     def configure_optimizers(self):
@@ -118,9 +127,9 @@ class UMPS(pl.LightningModule):
         x, y = batch
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
-        mae = F.l1_loss(x,y)
-        self.logger.summary.scalar('MSE loss', loss)
-        self.logger.summary.scalar('MAE', mae)
+        mae = F.l1_loss(predictions,y)
+        self.logger.experiment.add_scalar('train MSE loss', loss)
+        self.logger.experiment.add_scalar('train MAE', loss)
         return loss
 
 if __name__=='__main__':
