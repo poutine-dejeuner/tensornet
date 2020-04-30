@@ -77,7 +77,7 @@ class UMPS(pl.LightningModule):
         """
 
         if inputs.ndim == 4:
-            print(f'WARNING INPUT SHAPE ADJUSTED {inputs.shape}')
+            # print(f'WARNING INPUT SHAPE ADJUSTED {inputs.shape}')
             inputs = inputs[0]
         
         input_len = inputs.size(1)
@@ -111,7 +111,7 @@ class UMPS(pl.LightningModule):
 
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
-        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
+        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
         self.batch_size = 1
 
     def train_dataloader(self):
@@ -128,9 +128,8 @@ class UMPS(pl.LightningModule):
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
         mae = F.l1_loss(predictions,y)
-        self.logger.experiment.add_scalar('train MSE loss', loss)
-        self.logger.experiment.add_scalar('train MAE', loss)
-        return loss
+        tensorboard_logs = {'train MSE loss': loss, 'train MAE': mae}
+        return {'loss': loss, 'log': tensorboard_logs}
 
 if __name__=='__main__':
 
