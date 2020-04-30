@@ -42,27 +42,42 @@ class UMPS(pl.LightningModule):
         self.bond_dim = bond_dim
         #this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
         self._unused = torch.nn.LSTM(5, 5)
-        self.alpha = torch.randn(bond_dim, requires_grad = True)
+        self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
         self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
-        self.omega = torch.randn(bond_dim, requires_grad = True)
-        self.omega = torch.nn.Parameter(self.omega / torch.norm(self.omega))
-        self.output_core = create_tensor(bond_dim, feature_dim, bond_dim, opt='eye')
-        self.output_core.requires_grad = True
+        self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
+        self.omega = torch.nn.Parameter(self.omega)
+        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
-        tensor_core = create_tensor(bond_dim, feature_dim, bond_dim, opt='eye')
-        tensor_core.requires_grad = True
-        torch.nn.Parameter(tensor_core)
+        tensor_core = create_tensor((bond_dim, feature_dim, bond_dim), requires_grad=True, opt='norm')
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
         batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
         batch_core[:, 0, :] = eye
-        batch_core[:, 1:, :] = tensor_core
-        self.tensor_core = batch_core
+        batch_core[:, 1:, :] = tensor_core[:, :, :]
+
+        self.tensor_core = torch.nn.Parameter(batch_core)
+        self.register_parameter('tensor core', self.tensor_core)
+        self.register_parameter('output core', self.output_core)
+        self.register_parameter('alpha vector', self.alpha)
+        self.register_parameter('omega vector', self.omega)
+
+    def _collate_with_padding(self, inputs):
+        tensors_x, tensors_y = zip(*inputs)
+        max_input_len = max([tensor.shape[1] for tensor in tensors_x])
+        collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), dtype=tensors_x[0].dtype)
+        collated_tensors_x[:, :, 0] = 1
         
+        for ii, tensor in enumerate(tensors_x):
+            collated_tensors_x[ii, :tensor.shape[1], :] = tensor
+
+        collated_tensors_y = torch.stack(tensors_y, dim=0)
+
+        return collated_tensors_x, collated_tensors_y
+
 
     def forward(self, inputs: torch.Tensor):
         """
@@ -76,9 +91,6 @@ class UMPS(pl.LightningModule):
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         """
 
-        if inputs.ndim == 4:
-            # print(f'WARNING INPUT SHAPE ADJUSTED {inputs.shape}')
-            inputs = inputs[0]
         
         input_len = inputs.size(1)
         has_batch = inputs.size(0) > 1
@@ -86,7 +98,7 @@ class UMPS(pl.LightningModule):
         #splice the inputs tensor in the input_len dimension
         input_list = [inputs.select(1,i) for i in range(input_len)]
         input_list = [tn.Node(vect) for vect in input_list]
-        input_node_list = [tn.Node(self.tensor_core[has_batch]) for i in range(input_len)]
+        input_node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
 
         if self.output_dim > 0:
             output_node = tn.Node(self.output_core, name = 'output') 
@@ -111,10 +123,10 @@ class UMPS(pl.LightningModule):
 
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
-        self.dataset = MolDataset(os.path.join(filedir, 'data','qm9.csv'))
-        self.batch_size = 1
-        random_seed = 42
+        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
+        self.batch_size = 4
         validation_split = .2
+        random_seed = 42
 
         # Creating data indices for training and validation splits:
         dataset_size = len(self.dataset)
@@ -131,11 +143,11 @@ class UMPS(pl.LightningModule):
     def train_dataloader(self):
         num_workers = 1 #os.cpu_count()
         train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
-                num_workers=num_workers, shuffle=True)
+                num_workers=num_workers, shuffle=True, collate_fn=self._collate_with_padding)
         return train_loader
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=0)
+        return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=0)
 
     def training_step(self, batch, batch_idx):
         x, y = batch

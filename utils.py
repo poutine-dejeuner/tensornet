@@ -1,19 +1,20 @@
 import torch
 import tensornetwork as tn
+import math
 
-def create_tensor(shape,opt='eye'):
+def create_tensor(shape, opt='eye', **kwargs):
     if opt == 'eye':
-        return random_tensor(shape)
+        return random_tensor(shape, **kwargs)
     elif opt == 'norm':
-        tensor = torch.randn(shape)
+        tensor = torch.randn(shape, **kwargs)
         tensor = tensor / tensor_norm(tensor)
         return tensor
 
-def random_tensor(shape, std = 1e-8):
+def random_tensor(shape, std = 1e-8, **kwargs):
     
     ten = torch.eye(shape[0],shape[2])
     ten = ten.expand(shape)
-    noise = torch.sqrt(std)*torch.randn(shape)
+    noise = math.sqrt(std)*torch.randn(shape, **kwargs)
     ten = ten + noise
     return ten
 
