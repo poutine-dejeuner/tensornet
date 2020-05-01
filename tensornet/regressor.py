@@ -21,6 +21,7 @@ class Regressor(pl.LightningModule):
     def __init__(self, 
                 model: torch.nn.Module,
                 dataset,
+                transform=None,
                 lr: float=1e-4,
                 batch_size: int=4,
                 validation_split: float=0.2,
@@ -47,6 +48,7 @@ class Regressor(pl.LightningModule):
         self.validation_split = validation_split
         self.random_seed = random_seed
         self.num_workers = num_workers
+        self.transform = transform
         
         
 
@@ -95,13 +97,14 @@ class Regressor(pl.LightningModule):
 
         # Creating data samplers and loaders:
         self.train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_indices)
-        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
+        self.valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
 
 
     def train_dataloader(self):
         num_workers = self.num_workers #os.cpu_count()
         train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
-                num_workers=num_workers, shuffle=True, collate_fn=self._collate_with_padding)
+                num_workers=num_workers, sampler = self.train_sampler,
+                 collate_fn=self._collate_with_padding)
         return train_loader
 
 
@@ -113,7 +116,26 @@ class Regressor(pl.LightningModule):
         x, y = batch
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
-        mae = F.l1_loss(predictions,y)
-        tensorboard_logs = {'train MSE loss': loss, 'train MAE': mae}
+        mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
+        tensorboard_logs = {'train_MSE_loss': loss, 'train_MAE': mae}
         return {'loss': loss, 'log': tensorboard_logs}
 
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        predictions = self(x)
+        loss = F.mse_loss(predictions,y)
+        mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
+        tensorboard_logs = {'val_MSE_loss': loss, 'traval_MAE': mae}
+        return {'val_loss': loss, 'log': tensorboard_logs}
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
+        tensorboard_logs = {'val_loss': avg_loss}
+        return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
+
+    def val_dataloader(self):
+        num_workers = self.num_workers #os.cpu_count()
+        valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
+                num_workers=num_workers, sampler = self.valid_sampler,
+                 collate_fn=self._collate_with_padding)
+        return valid_loader
