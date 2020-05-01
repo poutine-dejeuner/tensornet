@@ -78,8 +78,9 @@ class UMPS(nn.Module):
         # Initializing neural network layers for the inputs
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
         in_size = self.feature_dim + 1
+        self.fc_input_layers = nn.ModuleList()
         if input_nn_depth == 0:
-            self.fc_input_layers = nn.ModuleList()
+            pass
         elif input_nn_depth == 1:
             input_nn_kwargs['activation'] = 'none'
             self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs))
