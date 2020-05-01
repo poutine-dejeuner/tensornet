@@ -1,5 +1,6 @@
 import torch
 import tensornetwork as tn
+import pandas as pd
 import math
 
 def create_tensor(shape, opt='eye', **kwargs):
@@ -139,3 +140,16 @@ def tensor_norm(tensor):
 
     return norm
 
+class normalise():
+    def __init__(self, datapath):
+        df  = pd.read_csv(datapath)
+        mean = torch.Tensor(df.mean().to_numpy())
+        std = torch.Tensor(df.std().to_numpy())
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+        return (tensor - self.mean)/self.std
+
+    def inverse(self, tensor):
+        return tensor*self.std + self.mean

@@ -29,7 +29,8 @@ class MolDataset(Dataset):
                            '1', '0', '3', '2', '5', '4', '7', '6', '9', '8', 
                            ':', '=', '@', '[', ']', '\\', 'c', 'o', 'n', 's', 
                            'H', 'B', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl',  'Br', 'I']
-        self.seq_transfo = SequenceTransformer(self.vocabulary, True)        
+        self.seq_transfo = SequenceTransformer(self.vocabulary, True)  
+        self.transform = transform      
 
     def __len__(self):
         return len(self.values)
@@ -47,14 +48,24 @@ class MolDataset(Dataset):
         #batch smiles are not all the same length, padding vectors (1,0,...,0)
         #are added for each missing caracters.
         parsedsmiles = self.seq_transfo(smiles).type(torch.double)
+        if self.transform != None:
+            values = self.transform(values)
         
         return parsedsmiles, values
 
 if __name__=='__main__':
     filedirpath = os.path.dirname(os.path.realpath(__file__))
-    datapath = os.path.join(filedirpath,'qm9.csv')
+    datapath = os.path.join(filedirpath,'data','qm9_mini.csv')
     ds=MolDataset(datapath)
     item=ds.__getitem__(4)
     print(item[0].size())
     print(item[1].size())
+    
+    from utils import normalise
+    transfo = normalise(datapath)
+    item = item[1]
+    print(item)
+    item = transfo(item)
+    print(item)
+    print(transfo.inverse(item))
     print('yo')

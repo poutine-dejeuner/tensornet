@@ -7,7 +7,7 @@ from dataset import MolDataset
 
 import torch.nn.functional as F
 from typing import List
-from utils import evaluate_input, batch_node, tensor_norm, create_tensor
+from utils import evaluate_input, batch_node, tensor_norm, create_tensor, normalise
 from ivbase.nn.base import FCLayer
 
 tn.set_default_backend("pytorch")
@@ -45,7 +45,15 @@ class UMPS(pl.LightningModule):
         self.feature_dim = feature_dim
         self.output_dim = output_dim
         self.bond_dim = bond_dim
-        
+        #this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
+        self._unused = torch.nn.LSTM(5, 5)
+        self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
+        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
+        self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
+        self.omega = torch.nn.Parameter(self.omega)
+        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
+        self.output_core = torch.nn.Parameter(self.output_core)
+
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
@@ -73,7 +81,8 @@ class UMPS(pl.LightningModule):
 
         # Generate input feature tensor, with only empty strings denoted by the one-hot vector [1, 0, 0, ...., 0]
         max_input_len = max([tensor.shape[1] for tensor in tensors_x])
-        collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), dtype=tensors_x[0].dtype)
+        collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), 
+                                                                dtype=tensors_x[0].dtype)
         collated_tensors_x[:, :, 0] = 1
         
         # Replace the non-empty one-hot by the input tensor_x
@@ -100,8 +109,8 @@ class UMPS(pl.LightningModule):
 
         
         input_len = inputs.size(1)
-
-        #splice the inputs tensor in the input_len dimension
+        
+        #slice the inputs tensor in the input_len dimension
         input_list = [inputs.select(1,i) for i in range(input_len)]
         input_list = [tn.Node(vect) for vect in input_list]
         input_node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
@@ -130,7 +139,7 @@ class UMPS(pl.LightningModule):
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
         self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
-        self.batch_size = 4
+        self.batch_size = 1
         validation_split = .2
         random_seed = 42
 
@@ -157,17 +166,17 @@ class UMPS(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        predictions = self(x)
+        predictions = self.normalise.inverse(self(x))
         loss = F.mse_loss(predictions,y)
         mae = F.l1_loss(predictions,y)
-        tensorboard_logs = {'train MSE loss': loss, 'train MAE': mae}
+        tensorboard_logs = {'train_MSE_loss': loss, 'train_MAE': mae}
         return {'loss': loss, 'log': tensorboard_logs}
 
 if __name__=='__main__':
 
     filedir = os.path.dirname(os.path.realpath(__file__))
-    dataset = MolDataset(os.path.join(filedir,'qm9.csv'))
+    dataset = MolDataset(os.path.join(filedir,'data','qm9.csv'))
     inputs = dataset.__getitem__(4)
-    mps = UMPS(feature_dim = 41, bond_dim = 100)
+    mps = UMPS(feature_dim = 40, bond_dim = 100)
     print(mps(inputs[0]))
 
