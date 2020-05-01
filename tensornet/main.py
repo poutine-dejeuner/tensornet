@@ -1,6 +1,7 @@
 from pytorch_lightning import Trainer
 from argparse import ArgumentParser
-from umps import UMPS
+
+from tensornet.umps import UMPS
 
 """
 For cluster computing.
