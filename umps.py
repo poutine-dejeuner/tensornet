@@ -8,6 +8,7 @@ from dataset import MolDataset
 import torch.nn.functional as F
 from typing import List
 from utils import evaluate_input, batch_node, tensor_norm, create_tensor
+from ivbase.nn.base import FCLayer
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -18,7 +19,8 @@ class UMPS(pl.LightningModule):
     def __init__(self, 
                 feature_dim: int, 
                 bond_dim: int,
-                output_dim: int = 0):
+                output_dim: int = 0,
+                input_nn_depth: int = 1):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -37,18 +39,13 @@ class UMPS(pl.LightningModule):
 
         super().__init__()
 
+        self._unused = torch.nn.LSTM(5, 5) # this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
+
+        # Basic attributes
         self.feature_dim = feature_dim
         self.output_dim = output_dim
         self.bond_dim = bond_dim
-        #this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
-        self._unused = torch.nn.LSTM(5, 5)
-        self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
-        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
-        self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
-        self.omega = torch.nn.Parameter(self.omega)
-        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
-        self.output_core = torch.nn.Parameter(self.output_core)
-
+        
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
@@ -58,12 +55,18 @@ class UMPS(pl.LightningModule):
         batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
         batch_core[:, 0, :] = eye
         batch_core[:, 1:, :] = tensor_core[:, :, :]
-
         self.tensor_core = torch.nn.Parameter(batch_core)
-        self.register_parameter('tensor core', self.tensor_core)
-        self.register_parameter('output core', self.output_core)
-        self.register_parameter('alpha vector', self.alpha)
-        self.register_parameter('omega vector', self.omega)
+
+        # Initializing other tensors for the tensor network
+        self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
+        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
+        self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
+        self.omega = torch.nn.Parameter(self.omega)
+        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
+        self.output_core = torch.nn.Parameter(self.output_core)
+
+        # Initializing neural network layers
+        # TODO
 
     def _collate_with_padding(self, inputs):
         tensors_x, tensors_y = zip(*inputs)
