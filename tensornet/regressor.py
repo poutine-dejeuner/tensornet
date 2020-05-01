@@ -125,7 +125,7 @@ class Regressor(pl.LightningModule):
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
         mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
-        tensorboard_logs = {'val_MSE_loss': loss, 'traval_MAE': mae}
+        tensorboard_logs = {'val_MSE_loss': loss, 'val_MAE': mae}
         return {'val_loss': loss, 'log': tensorboard_logs}
 
     def validation_epoch_end(self, outputs):
@@ -134,8 +134,9 @@ class Regressor(pl.LightningModule):
         return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
 
     def val_dataloader(self):
-        num_workers = self.num_workers #os.cpu_count()
+        num_workers = self.num_workers
         valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.valid_sampler,
                  collate_fn=self._collate_with_padding)
         return valid_loader
+        

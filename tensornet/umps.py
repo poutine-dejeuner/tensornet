@@ -79,18 +79,18 @@ class UMPS(nn.Module):
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
         in_size = self.feature_dim + 1
         if input_nn_depth == 0:
-            self.fc_input_layers = []
+            self.fc_input_layers = nn.ModuleList()
         elif input_nn_depth == 1:
             input_nn_kwargs['activation'] = 'none'
-            self.fc_input_layers = [FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs)]
+            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs))
         elif input_nn_depth >= 2:
-            self.fc_input_layers = [FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs)]
+            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs))
             fc_input_layers_ext = [FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, **input_nn_kwargs) for ii in range(input_nn_depth - 1)]
             self.fc_input_layers.extend(fc_input_layers_ext)
             input_nn_kwargs['activation'] = 'none'
             self.fc_input_layers.append(FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, **input_nn_kwargs))
         else:
-            raise ValueError('`input_nn_kwargs` must be a positive integer')
+            raise ValueError('`input_nn_depth` must be a positive integer')
         
 
     def forward(self, inputs: torch.Tensor):
@@ -137,5 +137,91 @@ class UMPS(nn.Module):
         output = evaluate_input(input_node_list, input_list).tensor
 
         return output
+
+
+
+class MultiUMPS(nn.Module):
+
+    def __init__(self, 
+                feature_dim:int, 
+                bond_dim:int,
+                output_dim:int=0,
+                tensor_init='eye',
+                input_nn_depth:int=0,
+                input_nn_out_size:int=32,
+                input_nn_kwargs=None,
+                output_n_umps:int=4,
+                output_depth:int=1,
+                output_nn_kwargs=None):
+        """
+        A matrix produt state that has the same core tensor at each nodes. This 
+        is an implementation of https://arxiv.org/abs/2003.01039
+
+        Args:
+            feature_dim:    The dimension of the embedding of each of the inputs.
+            bond_dim:       The dimension of the bond between each cores.
+            output_dim:     The dimension of the result of the contraction of the 
+                            network.
+
+        Returns:
+            contracted_node: Tensor resulting in the contraction of the network.
+            If using batch inputs, the result is tensor of dimension 
+            (output_dim, batch_dim)
+        """
+
+        super().__init__()
+
+        # Basic attributes
+        self.output_n_umps = output_n_umps
+        self.output_depth = output_depth
+
+        # Initializing neural network layers for the outputs
+        output_nn_kwargs = {} if output_nn_kwargs is None else output_nn_kwargs
+        
+        nn_size = output_dim * output_n_umps
+        
+        if output_depth == 0:
+            self.fc_output_layers = []
+        elif output_depth == 1:
+            output_nn_kwargs['activation'] = 'none'
+            self.fc_output_layers = [FCLayer(in_size=nn_size, out_size=output_dim, **output_nn_kwargs)]
+        elif output_depth >= 2:
+            self.fc_output_layers = [FCLayer(in_size=nn_size, out_size=nn_size, **output_nn_kwargs) for ii in range(input_nn_depth - 1)]
+            output_nn_kwargs['activation'] = 'none'
+            self.fc_output_layers.append(FCLayer(in_size=nn_size, out_size=output_dim, **output_nn_kwargs))
+        else:
+            raise ValueError('`input_nn_depth` must be a positive integer')
+        self.fc_output_layers = nn.ModuleList(self.fc_output_layers)
+        
+        # initializing tensor networks
+        self.umps = nn.ModuleList([UMPS(feature_dim, 
+                bond_dim=bond_dim,
+                output_dim=output_dim,
+                tensor_init=tensor_init,
+                input_nn_depth=input_nn_depth,
+                input_nn_out_size=input_nn_out_size,
+                input_nn_kwargs=input_nn_kwargs) for _ in range(output_n_umps)])
+
+
+    def forward(self, inputs: torch.Tensor):
+        """
+        Takes a batch input tensor, computes the number of inputs, creates a UMPS
+        of length length equal to the number of inputs, connects the input nodes
+        to the corresponding tensor nodes and returns the resulting contracted tensor.
+
+        Args:
+            inputs:     A torch tensor of dimensions (batch_dim, input_len, feature_dim)
+        
+        Returns:        A torch tensor of dimensions (batch_dim, output_dim)
+        """
+
+        umps_results = torch.cat([this_umps(inputs) for this_umps in self.umps], dim=-1)
+
+        output = umps_results
+        for fc_layer in self.fc_output_layers:
+            output = fc_layer(output)
+        
+        return output
+
 
 

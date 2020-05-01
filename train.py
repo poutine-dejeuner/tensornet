@@ -4,7 +4,7 @@ import pytorch_lightning
 from pytorch_lightning import Trainer
 
 from tensornet.regressor import Regressor
-from tensornet.umps import UMPS
+from tensornet.umps import UMPS, MultiUMPS
 from tensornet.dataset import MolDataset
 from tensornet.utils import normalise
 
@@ -18,8 +18,10 @@ if __name__ == "__main__":
     else:
         gpus = None
         
-    model = UMPS(feature_dim = 40, bond_dim = 10, output_dim = 19, tensor_init='eye',
-                input_nn_depth=0, input_nn_out_size=32)
+    # model = UMPS(feature_dim = 40, bond_dim = 40, output_dim = 19, tensor_init='eye',
+    #             input_nn_depth=0, input_nn_out_size=32)
+    model = MultiUMPS(feature_dim = 40, bond_dim = 20, output_dim = 19, tensor_init='eye',
+                input_nn_depth=0, input_nn_out_size=32, output_n_umps=4, output_depth=1)
     
     filedir = os.path.dirname(os.path.realpath(__file__))
     datapath = os.path.join(filedir, 'data/qm9_mini.csv')
