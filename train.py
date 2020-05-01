@@ -15,10 +15,10 @@ if __name__ == "__main__":
         gpus = 1
     else:
         gpus = None
-    model = UMPS(feature_dim = 40, output_dim = 19, bond_dim = 40)
+    model = UMPS(feature_dim = 40, output_dim = 19, bond_dim = 50)
     # filedir = os.path.dirname(os.path.realpath(__file__))
     # dataset = MolDataset(os.path.join(filedir, 'data/qm9.csv'))
-    trainer = Trainer(gpus=gpus, min_epochs=3, max_epochs=5)
+    trainer = Trainer(gpus=gpus, min_epochs=10, max_epochs=20)
     trainer.fit(model)
 
 

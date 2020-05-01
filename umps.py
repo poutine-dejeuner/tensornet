@@ -53,7 +53,7 @@ class UMPS(pl.LightningModule):
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
-        tensor_core = create_tensor((bond_dim, feature_dim, bond_dim), requires_grad=True, opt='norm')
+        tensor_core = create_tensor((bond_dim, feature_dim, bond_dim), requires_grad=True, opt='eye')
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
         batch_core = torch.zeros(bond_dim, 1 + feature_dim, bond_dim)
         batch_core[:, 0, :] = eye
@@ -67,13 +67,17 @@ class UMPS(pl.LightningModule):
 
     def _collate_with_padding(self, inputs):
         tensors_x, tensors_y = zip(*inputs)
+
+        # Generate input feature tensor, with only empty strings denoted by the one-hot vector [1, 0, 0, ...., 0]
         max_input_len = max([tensor.shape[1] for tensor in tensors_x])
         collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), dtype=tensors_x[0].dtype)
         collated_tensors_x[:, :, 0] = 1
         
+        # Replace the non-empty one-hot by the input tensor_x
         for ii, tensor in enumerate(tensors_x):
             collated_tensors_x[ii, :tensor.shape[1], :] = tensor
 
+        # Stack the input tensor_y
         collated_tensors_y = torch.stack(tensors_y, dim=0)
 
         return collated_tensors_x, collated_tensors_y
@@ -123,7 +127,7 @@ class UMPS(pl.LightningModule):
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
         self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
-        self.batch_size = 1
+        self.batch_size = 4
         validation_split = .2
         random_seed = 42
 
@@ -146,7 +150,7 @@ class UMPS(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=0)
+        return torch.optim.Adam(self.parameters(), lr=1e-4, weight_decay=0)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
@@ -163,3 +167,4 @@ if __name__=='__main__':
     inputs = dataset.__getitem__(4)
     mps = UMPS(feature_dim = 41, bond_dim = 100)
     print(mps(inputs[0]))
+

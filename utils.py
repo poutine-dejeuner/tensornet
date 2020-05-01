@@ -12,7 +12,7 @@ def create_tensor(shape, opt='eye', **kwargs):
 
 def random_tensor(shape, std = 1e-8, **kwargs):
     
-    ten = torch.eye(shape[0],shape[2])
+    ten = torch.eye(shape[0],shape[2]).reshape((shape[0], 1, shape[2]))
     ten = ten.expand(shape)
     noise = math.sqrt(std)*torch.randn(shape, **kwargs)
     ten = ten + noise
