@@ -47,13 +47,7 @@ class UMPS(pl.LightningModule):
         self.bond_dim = bond_dim
         #this LSTM doesnt do anything, only avoids a bud in pytorch-lightning
         self._unused = torch.nn.LSTM(5, 5)
-        self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
-        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
-        self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
-        self.omega = torch.nn.Parameter(self.omega)
-        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
-        self.output_core = torch.nn.Parameter(self.output_core)
-
+        
         #The tensor core of the UMPS is initialized. A second tensor eye is 
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
@@ -67,10 +61,11 @@ class UMPS(pl.LightningModule):
 
         # Initializing other tensors for the tensor network
         self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
-        self.alpha = torch.nn.Parameter(self.alpha / torch.norm(self.alpha))
+        self.alpha = torch.nn.Parameter(self.alpha)
         self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
         self.omega = torch.nn.Parameter(self.omega)
-        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), requires_grad=True, opt='norm')
+        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), 
+                                            requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
         # Initializing neural network layers
@@ -138,7 +133,9 @@ class UMPS(pl.LightningModule):
 
     def prepare_data(self):
         filedir = os.path.dirname(os.path.realpath(__file__))
-        self.dataset = MolDataset(os.path.join(filedir, 'data/qm9_mini.csv'))
+        datapath = os.path.join(filedir, 'data/qm9_mini.csv')
+        self.normalise = normalise(datapath)
+        self.dataset = MolDataset(datapath)
         self.batch_size = 1
         validation_split = .2
         random_seed = 42
@@ -153,12 +150,13 @@ class UMPS(pl.LightningModule):
 
         # Creating data samplers and loaders:
         self.train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_indices)
-        valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
+        self.valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
 
     def train_dataloader(self):
-        num_workers = 1 #os.cpu_count()
+        num_workers = os.cpu_count()
         train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
-                num_workers=num_workers, shuffle=True, collate_fn=self._collate_with_padding)
+                num_workers=num_workers, sampler=self.train_sampler, 
+                collate_fn=self._collate_with_padding)
         return train_loader
 
     def configure_optimizers(self):
@@ -171,6 +169,21 @@ class UMPS(pl.LightningModule):
         mae = F.l1_loss(predictions,y)
         tensorboard_logs = {'train_MSE_loss': loss, 'train_MAE': mae}
         return {'loss': loss, 'log': tensorboard_logs}
+
+    def val_dataloader(self):
+        num_workers = os.cpu_count()
+        validation_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
+                num_workers=num_workers, sampler=self.valid_sampler,
+                collate_fn=self._collate_with_padding)
+        return validation_loader
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        predictions = self.normalise.inverse(self(x))
+        loss = F.mse_loss(predictions,y)
+        mae = F.l1_loss(predictions,y)
+        tensorboard_logs = {'val_MSE_loss': loss, 'val_MAE': mae}
+        return {'val_MSE_loss': loss, 'log': tensorboard_logs}
 
 if __name__=='__main__':
 
