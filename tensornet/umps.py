@@ -58,11 +58,11 @@ class UMPS(nn.Module):
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
-        tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim + 1
-        tensor_core = create_tensor((bond_dim, tensor_num_feats - 1, bond_dim), requires_grad=True, 
+        tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim 
+        tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
                                                                                     opt=tensor_init)
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
-        batch_core = torch.zeros(bond_dim, tensor_num_feats, bond_dim)
+        batch_core = torch.zeros(bond_dim, tensor_num_feats + 1, bond_dim)
         batch_core[:, 0, :] = eye
         batch_core[:, 1:, :] = tensor_core[:, :, :]
         self.tensor_core = torch.nn.Parameter(batch_core)
@@ -111,10 +111,16 @@ class UMPS(nn.Module):
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         """
 
-        nned_inputs = inputs[:,1:,:]
+        #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
+        #We need the FC nn to preserve this.
+        nned_inputs = inputs[:,:,1:]
         for fc_layer in self.fc_input_layers:
             nned_inputs = fc_layer(nned_inputs)
-        inputs[:,1:,:] = nned_inputs
+        d1,d2,d3 = nned_inputs.shape
+        new_inputs = torch.zeros(d1,d2,d3+1)
+        new_inputs[:,:,0] = inputs[:,:,0]
+        new_inputs[:,:,1:] = nned_inputs
+        inputs = new_inputs
         # if len(self.fc_input_layers) > 0:
         #     inputs = F.softmax(inputs, dim=-1)
         
