@@ -20,7 +20,6 @@ if __name__ == "__main__":
         gpus = None
 
     datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_mini.csv')
-    print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', datapath)
     normaliser = normalise(datapath)
     dataset = MolDataset(datapath, normaliser)
         

@@ -54,12 +54,13 @@ class UMPS(nn.Module):
         self.input_nn_out_size = input_nn_out_size
         self.input_nn_kwargs = input_nn_kwargs
         
-        #The tensor core of the UMPS is initialized. A second tensor eye is 
+        #The tensor core of the UMPS is initialized. An identity matrix is
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
         tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim + 1
-        tensor_core = create_tensor((bond_dim, tensor_num_feats - 1, bond_dim), requires_grad=True, opt=tensor_init)
+        tensor_core = create_tensor((bond_dim, tensor_num_feats - 1, bond_dim), requires_grad=True, 
+                                                                                    opt=tensor_init)
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
         batch_core = torch.zeros(bond_dim, tensor_num_feats, bond_dim)
         batch_core[:, 0, :] = eye
@@ -77,19 +78,23 @@ class UMPS(nn.Module):
 
         # Initializing neural network layers for the inputs
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
-        in_size = self.feature_dim + 1
+        in_size = self.feature_dim
         self.fc_input_layers = nn.ModuleList()
         if input_nn_depth == 0:
             pass
         elif input_nn_depth == 1:
             input_nn_kwargs['activation'] = 'none'
-            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs))
+            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, 
+                                                                bias=False, **input_nn_kwargs))
         elif input_nn_depth >= 2:
-            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, **input_nn_kwargs))
-            fc_input_layers_ext = [FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, **input_nn_kwargs) for ii in range(input_nn_depth - 1)]
+            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, 
+                                                                bias=False, **input_nn_kwargs))
+            fc_input_layers_ext = [FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, 
+                                bias=False, **input_nn_kwargs) for ii in range(input_nn_depth - 1)]
             self.fc_input_layers.extend(fc_input_layers_ext)
             input_nn_kwargs['activation'] = 'none'
-            self.fc_input_layers.append(FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, **input_nn_kwargs))
+            self.fc_input_layers.append(FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, 
+                                                                bias=False, **input_nn_kwargs))
         else:
             raise ValueError('`input_nn_depth` must be a positive integer')
         
@@ -106,13 +111,14 @@ class UMPS(nn.Module):
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         """
 
-        # 
+        nned_inputs = inputs[:,1:,:]
         for fc_layer in self.fc_input_layers:
-            inputs = fc_layer(inputs)
+            nned_inputs = fc_layer(nned_inputs)
+        inputs[:,1:,:] = nned_inputs
         # if len(self.fc_input_layers) > 0:
         #     inputs = F.softmax(inputs, dim=-1)
         
-        #splice the inputs tensor in the input_len dimension
+        #slice the inputs tensor in the input_len dimension
         input_len = inputs.size(1)
         input_list = [inputs.select(1,i) for i in range(input_len)]
         input_list = [tn.Node(vect) for vect in input_list]
