@@ -5,12 +5,14 @@ import tensornetwork as tn
 import pytorch_lightning as pl
 
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
+
 from typing import List
 from ivbase.nn.base import FCLayer
 
 from tensornet.dataset import MolDataset
 from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor, normalise
-
+from tensornet.umps import UMPS
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -117,7 +119,8 @@ class Regressor(pl.LightningModule):
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
         mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
-        tensorboard_logs = {'train_MSE_loss': loss, 'train_MAE': mae}
+        tensorboard_logs = {'loss_MSE/train': loss, 'MAE/train': mae}
+
         return {'loss': loss, 'log': tensorboard_logs}
 
     def validation_step(self, batch, batch_idx):
@@ -125,13 +128,22 @@ class Regressor(pl.LightningModule):
         predictions = self(x)
         loss = F.mse_loss(predictions,y)
         mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
-        tensorboard_logs = {'val_MSE_loss': loss, 'val_MAE': mae}
-        return {'val_loss': loss, 'log': tensorboard_logs}
+        tensorboard_logs = {'loss_MSE/val': loss, 'MAE/val': mae}
+
+        return {'log': tensorboard_logs}
+
 
     def validation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
-        return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
+        avg_loss = torch.stack([x['log']['loss_MSE/val'] for x in outputs]).mean()
+        avg_mae = torch.stack([x['log']['MAE/val'] for x in outputs]).mean()
+        tensorboard_logs = {'loss_MSE/val': avg_loss, 'MAE/val': avg_mae}
+
+        if isinstance(self.model, UMPS):
+            self.logger.experiment.add_image('tensor_ABS_SUM/val', 
+                    torch.sum(torch.abs(self.model.tensor_core), dim=1), self.current_epoch+1, dataformats='HW')
+
+        return {'log': tensorboard_logs}
+
 
     def val_dataloader(self):
         num_workers = self.num_workers
@@ -139,4 +151,5 @@ class Regressor(pl.LightningModule):
                 num_workers=num_workers, sampler = self.valid_sampler,
                  collate_fn=self._collate_with_padding)
         return valid_loader
+        
         
