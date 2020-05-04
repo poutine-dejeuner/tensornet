@@ -76,6 +76,8 @@ class UMPS(nn.Module):
                                             requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
+        self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]))
+
         # Initializing neural network layers for the inputs
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
         in_size = self.feature_dim
@@ -121,8 +123,9 @@ class UMPS(nn.Module):
         new_inputs[:,:,0] = inputs[:,:,0]
         new_inputs[:,:,1:] = nned_inputs
         inputs = new_inputs
-        # if len(self.fc_input_layers) > 0:
-        #     inputs = F.softmax(inputs, dim=-1)
+        # inputs = F.layer_norm(inputs, inputs.shape[-1:])
+        if len(self.fc_input_layers) > 0:
+            inputs = F.softmax(inputs*self.softmax_temperature, dim=-1)
         
         #slice the inputs tensor in the input_len dimension
         input_len = inputs.size(1)

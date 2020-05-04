@@ -136,11 +136,18 @@ class Regressor(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['log']['loss_MSE/val'] for x in outputs]).mean()
         avg_mae = torch.stack([x['log']['MAE/val'] for x in outputs]).mean()
+        
+        
+
         tensorboard_logs = {'loss_MSE/val': avg_loss, 'MAE/val': avg_mae}
 
+        
+
         if isinstance(self.model, UMPS):
+            epoch = self.current_epoch + 1 if self.global_step > 0 else 0
+            
             self.logger.experiment.add_image('tensor_ABS_SUM/val', 
-                    torch.sum(torch.abs(self.model.tensor_core), dim=1), self.current_epoch+1, dataformats='HW')
+                    torch.sum(torch.abs(self.model.tensor_core), dim=1), epoch, dataformats='HW')
 
         return {'log': tensorboard_logs}
 
