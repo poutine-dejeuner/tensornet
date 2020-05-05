@@ -5,22 +5,50 @@ from ivbase.nn.base import FCLayer
 
 class LSTMPredictor(nn.Module):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, dataset, 
+                    lstm_depth, lstm_hidden_size, lstm_bidirectional, lstm_kwargs=None, 
+                    out_nn_depth=2, out_nn_kwargs=None):
         super().__init__()
-        self.lstm = nn.LSTM(*args, **kwargs)
-        
+
+        # Basic attributes
+        self.dataset = dataset
+        self.lstm_depth = lstm_depth
+        self.lstm_hidden_size = lstm_hidden_size
+        self.lstm_bidirectional = lstm_bidirectional
+        self.num_direction = lstm_bidirectional + 1
+        self.lstm_kwargs = {} if lstm_kwargs is None else lstm_kwargs
+        self.out_nn_depth = out_nn_depth
+        self.out_nn_kwargs = {} if out_nn_kwargs is None else out_nn_kwargs
+
+        self.feature_dim = dataset[0][0].shape[-1]
+        self.output_dim = dataset[0][1].shape[-1]
+
+        # Generate the LSTM and output NN
+        self.lstm = nn.LSTM(
+                    input_size=self.feature_dim, hidden_size=lstm_hidden_size, 
+                    num_layers=lstm_depth, bidirectional=lstm_bidirectional, 
+                    **self.lstm_kwargs)
+
+        nn_in_size = lstm_hidden_size * self.num_direction * lstm_depth
+        self.out_nn = SimpleFeedForwardNN(
+                    depth=out_nn_depth,
+                    in_size=nn_in_size, 
+                    out_size=self.output_dim,
+                    activation='relu', last_activation='none',
+                    **self.out_nn_kwargs)
 
 
     def forward(self, inputs, hx=None):
         inputs = inputs.permute(1, 0, 2)
-        hn, cn = super().forward(inputs, hx=hx)
+        _, (hn, cn) = self.lstm.forward(inputs, hx=hx)
+
+        output = cn
+        output = output.permute(1, 0, 2)
+        output = output.reshape(output.shape[0], -1)
+
+        output = self.out_nn(output)
         
-        # INCOMPLETE!!!!!!!!!!!!!!!!!!!!!!!!
-        embeds = self.word_embeddings(sentence)
-        lstm_out, _ = self.lstm(embeds.view(len(sentence), 1, -1))
-        tag_space = self.hidden2tag(lstm_out.view(len(sentence), -1))
-        tag_scores = F.log_softmax(tag_space, dim=1)
-        return tag_scores
+        return output
 
 
 
@@ -62,3 +90,5 @@ class SimpleFeedForwardNN(nn.Module):
         for fc_layer in self.fc_layers:
             inputs = fc_layer(inputs)
         return inputs
+
+

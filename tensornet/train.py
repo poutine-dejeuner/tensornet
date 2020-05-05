@@ -37,6 +37,9 @@ if __name__ == "__main__":
     # model = MultiUMPS(dataset=dataset, bond_dim = 50, tensor_init='eye',
     #             input_nn_depth=1, input_nn_out_size=32, output_n_umps=4, output_depth=1)
     
+    model = LSTMPredictor(dataset=dataset, 
+                    lstm_depth=2, lstm_hidden_size=100, lstm_bidirectional=True, lstm_kwargs=None, 
+                    out_nn_depth=1, out_nn_kwargs=None)
     
     regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=16,
                 validation_split=0.2, random_seed=RANDOM_SEED, num_workers=1, dtype=DTYPE)
