@@ -4,6 +4,11 @@ import numpy as np
 import pandas as pd
 import math
 
+from typing import Any
+from tensornetwork.backends.pytorch.pytorch_backend import PyTorchBackend
+
+Tensor = Any
+
 def create_tensor(shape, opt='eye', dtype=torch.float, **kwargs):
     if opt == 'eye':
         tensor = random_tensor(shape, **kwargs)
@@ -36,6 +41,7 @@ def evaluate_input(node_list, input_list, dtype=torch.float):
     Returns:
         closed_list: List of tensors that encodes the closed tensor network
     """
+    device = node_list[0].tensor.device
     num_cores = len(node_list)
     assert len(input_list) == num_cores
     assert len(set(len(inp.shape) for inp in input_list)) == 1
@@ -49,7 +55,7 @@ def evaluate_input(node_list, input_list, dtype=torch.float):
         assert all(i.shape[0] == batch_dim for i in input_list)
 
         # Generate copy node for dealing with batch dims
-        batch_edges = batch_node(num_cores, batch_dim, dtype=dtype)
+        batch_edges, _ = batch_node(num_cores, batch_dim, dtype=dtype, device = device)
         assert len(batch_edges) == num_cores + 1
         
 
@@ -70,15 +76,15 @@ def evaluate_input(node_list, input_list, dtype=torch.float):
     # dimension (batch_dim, output_dim)
     if len(free_edges) > 1:
         batch_edge = batch_edges[-1]
-        edge = free_edges.difference({batch_edge})
-        free_edges = [batch_edge]+list(edge)
+        free_edges.remove(batch_edge)
+        free_edges = [batch_edge] + free_edges
                 
     free_edges = tuple(free_edges)
     contractor = tn.contractors.auto
 
     return contractor(net, free_edges)
 
-def batch_node(num_inputs, batch_dim, dtype=torch.float):
+def batch_node(num_inputs, batch_dim, device, dtype=torch.float):
     """
     Return a network of small CopyNodes which emulates a large CopyNode
     ​
@@ -95,6 +101,7 @@ def batch_node(num_inputs, batch_dim, dtype=torch.float):
     Returns:
         edge_list:  List of edges of our composite CopyNode object
     """
+    # A copy node has a diagonal tensor: 1 when all indices are equal and 0 elsewhere.
     # For small numbers of edges, just use a single CopyNode. Every pair of 
     # input nodes will be connected to a copy node with 3 edges thus reducing
     # the number of free edges by one each times and this process is repeated 
@@ -107,16 +114,18 @@ def batch_node(num_inputs, batch_dim, dtype=torch.float):
 
     num_edges = num_inputs + 1
     if num_edges < 4:
-        node = tn.CopyNode(rank=num_edges, dimension=batch_dim, name = 'copy', dtype=numpy_dtype)
-        return node.get_all_edges()
+        node = tn.CopyNode(rank=num_edges, dimension=batch_dim, name = 'copy', 
+                                backend = PyTorchBackendDevice(device=device), dtype=numpy_dtype)
+        return node.get_all_edges(), [node]
     
     # Initialize list of free edges with output of trivial identity mats
-    input_node = tn.Node(torch.eye(batch_dim), name = 'input')
+    input_node = tn.Node(torch.eye(batch_dim, device = device), name = 'input')
     edge_list, dummy_list = zip(*[input_node.copy().get_all_edges() 
                                     for _ in range(num_edges)])
     
     # Iteratively contract dummy edges until we have less than 4
     dummy_len = len(dummy_list)
+    copy_node_list = []
     while dummy_len > 4:
         odd = dummy_len % 2 == 1
         half_len = dummy_len // 2
@@ -124,10 +133,12 @@ def batch_node(num_inputs, batch_dim, dtype=torch.float):
         # Apply third order tensor to contract two dummy indices together
         temp_list = []
         for i in range(half_len):
-            temp_node = tn.CopyNode(rank=3, dimension=batch_dim, name = 'copy', dtype=numpy_dtype)
-            temp_node[1] ^ dummy_list[2 * i]
-            temp_node[2] ^ dummy_list[2 * i + 1]
-            temp_list.append(temp_node[0])
+            node = tn.CopyNode(rank=3, dimension=batch_dim, name = 'copy', 
+                                backend = PyTorchBackendDevice(device=device), dtype=numpy_dtype)
+            copy_node_list.append(node)
+            node[1] ^ dummy_list[2 * i]
+            node[2] ^ dummy_list[2 * i + 1]
+            temp_list.append(node[0])
         if odd:
             temp_list.append(dummy_list[-1])
     
@@ -135,10 +146,11 @@ def batch_node(num_inputs, batch_dim, dtype=torch.float):
         dummy_len = len(dummy_list)
     
     # Contract the last dummy indices together
-    last_node = tn.CopyNode(rank=dummy_len, dimension=batch_dim, name = 'last copy', dtype=numpy_dtype)
+    last_node = tn.CopyNode(rank=dummy_len, dimension=batch_dim, name = 'last copy',
+                                backend = PyTorchBackendDevice(device=device), dtype=numpy_dtype)
     [last_node[i] ^ dummy_list[i] for i in range(dummy_len)]
     
-    return edge_list
+    return edge_list, copy_node_list
 
 
 def tensor_norm(tensor):
@@ -178,3 +190,12 @@ class TorchScalerWrapper():
         self.dtype = dtype
         return self
 
+class PyTorchBackendDevice(PyTorchBackend):
+
+    def __init__(self, device=torch.device('cpu')):
+        super().__init__()
+        self.device = device
+
+    def convert_to_tensor(self, tensor: Tensor) -> Tensor:
+        result = torch.as_tensor(tensor, device=self.device)
+        return result

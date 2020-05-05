@@ -132,7 +132,7 @@ class UMPS(nn.Module):
         for fc_layer in self.fc_input_layers:
             nned_inputs = fc_layer(nned_inputs)
         d1,d2,d3 = nned_inputs.shape
-        new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype)
+        new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
         new_inputs[:,:,0] = inputs[:,:,0]
         new_inputs[:,:,1:] = nned_inputs
         inputs = new_inputs

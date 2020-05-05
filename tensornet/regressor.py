@@ -118,8 +118,8 @@ class Regressor(pl.LightningModule):
         x, y = batch
         preds = self(x)
         scaler = self.dataset.scaler
-        preds_inv = scaler.inverse_transform(preds.clone().detach())
-        y_inv = scaler.inverse_transform(y.clone().detach())
+        preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+        y_inv = scaler.inverse_transform(y.clone().detach().cpu())
 
         loss = F.mse_loss(preds,y)
         mae = F.l1_loss(preds, y)
@@ -133,8 +133,8 @@ class Regressor(pl.LightningModule):
         x, y = batch
         preds = self(x)
         scaler = self.dataset.scaler
-        preds_inv = scaler.inverse_transform(preds.clone().detach())
-        y_inv = scaler.inverse_transform(y.clone().detach())
+        preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+        y_inv = scaler.inverse_transform(y.clone().detach().cpu())
 
         loss = F.mse_loss(preds,y)
         mae = F.l1_loss(preds, y)
