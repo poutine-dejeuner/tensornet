@@ -11,6 +11,7 @@ from typing import List
 from ivbase.nn.base import FCLayer
 
 from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
+from tensornet.basemodels import SimpleFeedForwardNN
 
 
 tn.set_default_backend("pytorch")
@@ -81,25 +82,11 @@ class UMPS(nn.Module):
 
         # Initializing neural network layers for the inputs
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
-        in_size = self.feature_dim
-        self.fc_input_layers = nn.ModuleList()
-        if input_nn_depth == 0:
-            pass
-        elif input_nn_depth == 1:
-            input_nn_kwargs['activation'] = 'none'
-            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, 
-                                                                bias=False, **input_nn_kwargs))
-        elif input_nn_depth >= 2:
-            self.fc_input_layers.append(FCLayer(in_size=in_size, out_size=input_nn_out_size, 
-                                                                bias=False, **input_nn_kwargs))
-            fc_input_layers_ext = [FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, 
-                                bias=False, **input_nn_kwargs) for ii in range(input_nn_depth - 1)]
-            self.fc_input_layers.extend(fc_input_layers_ext)
-            input_nn_kwargs['activation'] = 'none'
-            self.fc_input_layers.append(FCLayer(in_size=input_nn_out_size, out_size=input_nn_out_size, 
-                                                                bias=False, **input_nn_kwargs))
-        else:
-            raise ValueError('`input_nn_depth` must be a positive integer')
+        self.input_nn = SimpleFeedForwardNN(
+                                        depth=input_nn_depth, in_size=self.feature_dim, 
+                                        out_size=input_nn_out_size,
+                                        activation='relu', last_activation='none', 
+                                        **input_nn_kwargs)
 
         self.to(dtype)
         pass
@@ -129,15 +116,15 @@ class UMPS(nn.Module):
         #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
         #We need the FC nn to preserve this.
         nned_inputs = inputs[:,:,1:]
-        for fc_layer in self.fc_input_layers:
-            nned_inputs = fc_layer(nned_inputs)
+        nned_inputs = self.input_nn(nned_inputs)
+
         d1,d2,d3 = nned_inputs.shape
         new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
         new_inputs[:,:,0] = inputs[:,:,0]
         new_inputs[:,:,1:] = nned_inputs
         inputs = new_inputs
         # inputs = F.layer_norm(inputs, inputs.shape[-1:])
-        if len(self.fc_input_layers) > 0:
+        if self.input_nn_depth > 0:
             inputs = F.softmax(inputs*self.softmax_temperature, dim=-1)
         
         #slice the inputs tensor in the input_len dimension
@@ -208,24 +195,17 @@ class MultiUMPS(nn.Module):
         # Basic attributes
         self.output_n_umps = output_n_umps
         self.output_depth = output_depth
+        self.output_dim = dataset[0][1].shape[-1]
 
         # Initializing neural network layers for the outputs
         output_nn_kwargs = {} if output_nn_kwargs is None else output_nn_kwargs
-        
         nn_size = output_dim * output_n_umps
-        
-        if output_depth == 0:
-            self.fc_output_layers = []
-        elif output_depth == 1:
-            output_nn_kwargs['activation'] = 'none'
-            self.fc_output_layers = [FCLayer(in_size=nn_size, out_size=output_dim, **output_nn_kwargs)]
-        elif output_depth >= 2:
-            self.fc_output_layers = [FCLayer(in_size=nn_size, out_size=nn_size, **output_nn_kwargs) for ii in range(input_nn_depth - 1)]
-            output_nn_kwargs['activation'] = 'none'
-            self.fc_output_layers.append(FCLayer(in_size=nn_size, out_size=output_dim, **output_nn_kwargs))
-        else:
-            raise ValueError('`input_nn_depth` must be a positive integer')
-        self.fc_output_layers = nn.ModuleList(self.fc_output_layers)
+        self.output_nn = SimpleFeedForwardNN(
+                                depth=output_depth, 
+                                in_size=nn_size, 
+                                out_size=nn_size,
+                                activation='relu', last_activation='none', 
+                                **output_nn_kwargs)
         
         # initializing tensor networks
         self.umps = nn.ModuleList([UMPS(
@@ -251,11 +231,8 @@ class MultiUMPS(nn.Module):
         """
 
         umps_results = torch.cat([this_umps(inputs) for this_umps in self.umps], dim=-1)
-
-        output = umps_results
-        for fc_layer in self.fc_output_layers:
-            output = fc_layer(output)
-        
+        output = self.output_nn(umps_results)
+       
         return output
 
     def to(self, dtype):

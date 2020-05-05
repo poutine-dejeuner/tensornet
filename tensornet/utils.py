@@ -77,8 +77,8 @@ def evaluate_input(node_list, input_list, dtype=torch.float):
     if len(free_edges) > 1:
         batch_edge = batch_edges[-1]
         free_edges.remove(batch_edge)
-        free_edges = [batch_edge] + free_edges
-                
+        free_edges = [batch_edge] + list(free_edges)
+    
     free_edges = tuple(free_edges)
     contractor = tn.contractors.auto
 

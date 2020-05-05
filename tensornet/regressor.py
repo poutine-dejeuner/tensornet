@@ -114,38 +114,36 @@ class Regressor(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
 
 
-    def training_step(self, batch, batch_idx):
+    def _get_loss_logs(self, batch, batch_idx, step_name:str):
+        # Get the truth `y`, predictions and compute the MSE and MAE
         x, y = batch
         preds = self(x)
         scaler = self.dataset.scaler
-        preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-        y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-
         loss = F.mse_loss(preds,y)
         mae = F.l1_loss(preds, y)
-        mae_global = F.l1_loss(preds_inv, y_inv)
-        tensorboard_logs = {'MSE_loss/train': loss, 'MAE_norm/train': mae, 'MAE_global/train': mae_global}
+        
+        tensorboard_logs = {f'MSE_loss/{step_name}': loss, f'MAE_norm/{step_name}': mae}
+
+        # If there is a scaler, reverse the scaling and compute the MAE
+        if scaler is not None:
+            preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+            y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+            tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 
         return {'loss': loss, 'log': tensorboard_logs}
 
 
+    def training_step(self, batch, batch_idx):
+        return self._get_loss_logs(batch, batch_idx, step_name='train')
+
+ 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
-        preds = self(x)
-        scaler = self.dataset.scaler
-        preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-        y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-
-        loss = F.mse_loss(preds,y)
-        mae = F.l1_loss(preds, y)
-        mae_global = F.l1_loss(preds_inv, y_inv)
-        tensorboard_logs = {'MSE_loss/val': loss, 'MAE_norm/val': mae, 'MAE_global/val': mae_global}
-
-        return {'log': tensorboard_logs}
+        return self._get_loss_logs(batch, batch_idx, step_name='val')
 
 
     def validation_epoch_end(self, outputs):
 
+        # Transform the list of dict of dict, into a dict of list of dict
         log_dict = {}
         for out in outputs:
             for log_key, log_val in out['log'].items():
@@ -153,13 +151,17 @@ class Regressor(pl.LightningModule):
                     log_dict[log_key] = []
                 log_dict[log_key].append(log_val)
         
+        # Compute the average of all the metrics
         tensorboard_logs = {log_key: torch.stack(log_val).mean() for log_key, log_val in log_dict.items()}
         
         cur_epoch = self.current_epoch + 1 if self.global_step > 0 else 0
 
+        # For the UMPS, display the sum of the absolute value of the tensor
         if isinstance(self.model, UMPS):
             self.logger.experiment.add_image('tensor_ABS_SUM/val', 
-                    torch.sum(torch.abs(self.model.tensor_core), dim=1), cur_epoch, dataformats='HW')
+                    torch.sum(torch.abs(self.model.tensor_core), dim=1), cur_epoch, dataformats='HW')c
+
+        # For the MultiUMPS, display the sum of the absolute value of each tensor
         elif isinstance(self.model, MultiUMPS):
             for ii, sub_model in enumerate(self.model.umps):
                 self.logger.experiment.add_image(f'tensor_ABS_SUM/val_{ii}', 
