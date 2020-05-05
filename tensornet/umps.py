@@ -10,7 +10,6 @@ import pytorch_lightning as pl
 from typing import List
 from ivbase.nn.base import FCLayer
 
-from tensornet.dataset import MolDataset
 from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
 
 
@@ -21,9 +20,8 @@ torch.set_default_tensor_type(torch.DoubleTensor)
 class UMPS(nn.Module):
 
     def __init__(self, 
-                feature_dim:int, 
                 bond_dim:int,
-                output_dim:int=0,
+                dataset,
                 tensor_init='eye',
                 input_nn_depth:int=0,
                 input_nn_out_size:int=32,
@@ -34,10 +32,7 @@ class UMPS(nn.Module):
         is an implementation of https://arxiv.org/abs/2003.01039
 
         Args:
-            feature_dim:    The dimension of the embedding of each of the inputs.
             bond_dim:       The dimension of the bond between each cores.
-            output_dim:     The dimension of the result of the contraction of the 
-                            network.
 
         Returns:
             contracted_node: Tensor resulting in the contraction of the network.
@@ -48,14 +43,16 @@ class UMPS(nn.Module):
         super().__init__()
 
         # Basic attributes
-        self.feature_dim = feature_dim
-        self.output_dim = output_dim
+        self.dataset = dataset
         self.bond_dim = bond_dim
         self.input_nn_depth = input_nn_depth
         self.input_nn_out_size = input_nn_out_size
         self.input_nn_kwargs = input_nn_kwargs
         self.dtype = dtype
-        
+
+        self.feature_dim = dataset[0][0].shape[-1] - 1
+        self.output_dim = dataset[0][1].shape[-1]
+
         #The tensor core of the UMPS is initialized. An identity matrix is
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
@@ -74,7 +71,7 @@ class UMPS(nn.Module):
         self.alpha = torch.nn.Parameter(self.alpha)
         self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
         self.omega = torch.nn.Parameter(self.omega)
-        self.output_core = create_tensor((bond_dim, output_dim, bond_dim), 
+        self.output_core = create_tensor((bond_dim, self.output_dim, bond_dim), 
                                             requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
@@ -169,9 +166,8 @@ class UMPS(nn.Module):
 class MultiUMPS(nn.Module):
 
     def __init__(self, 
-                feature_dim:int, 
+                dataset, 
                 bond_dim:int,
-                output_dim:int=0,
                 tensor_init='eye',
                 input_nn_depth:int=0,
                 input_nn_out_size:int=32,
@@ -220,9 +216,9 @@ class MultiUMPS(nn.Module):
         self.fc_output_layers = nn.ModuleList(self.fc_output_layers)
         
         # initializing tensor networks
-        self.umps = nn.ModuleList([UMPS(feature_dim, 
+        self.umps = nn.ModuleList([UMPS(
+                dataset=dataset, 
                 bond_dim=bond_dim,
-                output_dim=output_dim,
                 tensor_init=tensor_init,
                 input_nn_depth=input_nn_depth,
                 input_nn_out_size=input_nn_out_size,

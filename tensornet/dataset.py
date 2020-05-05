@@ -6,6 +6,7 @@ from ivbase.transformers.features.molecules import SequenceTransformer
 
 from tensornet.arg_checker import check_arg_iterator
 
+
 class MolDataset(Dataset):
     """
     The __getitem__ function takes in a list of indices (of tensor) and returns two 
@@ -43,7 +44,8 @@ class MolDataset(Dataset):
                            '1', '0', '3', '2', '5', '4', '7', '6', '9', '8', 
                            ':', '=', '@', '[', ']', '\\', 'c', 'o', 'n', 's', 
                            'H', 'B', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl',  'Br', 'I']
-        self.seq_transfo = SequenceTransformer(self.vocabulary, True)  
+        self.seq_transfo = SequenceTransformer(self.vocabulary, True)
+
         self.scaler = None
         if scaler is not None:
             _, values = self[:]
@@ -65,11 +67,13 @@ class MolDataset(Dataset):
         #batch smiles are not all the same length, padding vectors (1,0,...,0)
         #are added for each missing caracters.
         parsedsmiles = self.seq_transfo(smiles).type(self.dtype)
+
         if self.scaler != None:
             values = self.scaler.transform(values)
             if isinstance(values, np.ndarray):
-                values = torch.Tensor(values).to(self.dtype)
-        
+                values = torch.Tensor(values)
+        values = values.to(self.dtype)
+
         return parsedsmiles, values
 
     def to(self, dtype):
@@ -95,9 +99,9 @@ class CosineDataset(Dataset):
         values: tensor of dimension (batch_size, 19)
     """
 
-    def __init__(self, csvpath, transform = None, features_prefix='feat_', labels_prefix=['amplitude', 'wavelength']):
+    def __init__(self, csvpath, scaler=None, features_prefix='feat_', labels_prefix=['amplitude_', 'wavelength_'], dtype=torch.float):
 
-        
+        self.dtype = dtype
         labels_prefix = check_arg_iterator(labels_prefix)
 
         self.path=csvpath
@@ -111,6 +115,11 @@ class CosineDataset(Dataset):
         labels_prefix = check_arg_iterator(labels_prefix)
         values_cols = [col for col in cols for pref in labels_prefix if (isinstance(col, str) and col.startswith(pref))]
         self.values = df[values_cols].values
+
+        self.scaler = None
+        if scaler is not None:
+            _, values = self[:]
+            self.scaler = scaler.fit(values)
         
 
     def __len__(self):
@@ -121,25 +130,23 @@ class CosineDataset(Dataset):
         idx = check_arg_iterator(idx, enforce_type=list)
         
         values = torch.Tensor(self.values[idx])
-        features = torch.Tensor(self.features[idx])
+        features_temp = torch.Tensor(self.features[idx]).to(self.dtype).unsqueeze(-1)
+        features = torch.zeros((features_temp.shape[0], self.features.shape[1], 2), dtype=self.dtype)
+        features[:, :, 1:] = features_temp
         
+        
+        if self.scaler != None:
+            values = self.scaler.transform(values)
+            if isinstance(values, np.ndarray):
+                values = torch.Tensor(values)
+            
+        values = values.to(self.dtype)
+
         return features, values
 
 
-if __name__=='__main__':
-    filedirpath = os.path.dirname(os.path.realpath(__file__))
-    datapath = os.path.join(filedirpath,'data','qm9_mini.csv')
-    ds=MolDataset(datapath)
-    item=ds.__getitem__(4)
-    print(item[0].size())
-    print(item[1].size())
-    
-    from utils import normalise
-    transfo = normalise(datapath)
-    item = item[1]
-    print(item)
-    item = transfo(item)
-    print(item)
-    print(transfo.inverse(item))
-    print('yo')
-
+    def to(self, dtype):
+        self.dtype = dtype
+        if self.scaler is not None:
+            self.scaler.to(dtype)
+        return self

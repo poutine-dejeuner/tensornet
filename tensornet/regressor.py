@@ -119,10 +119,11 @@ class Regressor(pl.LightningModule):
         preds = self(x)
         scaler = self.dataset.scaler
         preds_inv = scaler.inverse_transform(preds.clone().detach())
+        y_inv = scaler.inverse_transform(y.clone().detach())
+
         loss = F.mse_loss(preds,y)
         mae = F.l1_loss(preds, y)
-        
-        mae_global = F.l1_loss(preds_inv, scaler.inverse_transform(y))
+        mae_global = F.l1_loss(preds_inv, y_inv)
         tensorboard_logs = {'MSE_loss/train': loss, 'MAE_norm/train': mae, 'MAE_global/train': mae_global}
 
         return {'loss': loss, 'log': tensorboard_logs}
@@ -133,10 +134,11 @@ class Regressor(pl.LightningModule):
         preds = self(x)
         scaler = self.dataset.scaler
         preds_inv = scaler.inverse_transform(preds.clone().detach())
+        y_inv = scaler.inverse_transform(y.clone().detach())
+
         loss = F.mse_loss(preds,y)
         mae = F.l1_loss(preds, y)
-
-        mae_global = F.l1_loss(preds_inv, scaler.inverse_transform(y))
+        mae_global = F.l1_loss(preds_inv, y_inv)
         tensorboard_logs = {'MSE_loss/val': loss, 'MAE_norm/val': mae, 'MAE_global/val': mae_global}
 
         return {'log': tensorboard_logs}
