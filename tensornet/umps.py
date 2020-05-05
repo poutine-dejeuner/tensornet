@@ -26,7 +26,8 @@ class UMPS(nn.Module):
                 input_nn_depth:int=0,
                 input_nn_out_size:int=32,
                 input_nn_kwargs=None,
-                dtype=torch.float):
+                dtype=torch.float,
+                batch_max_parallel=4):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -49,6 +50,7 @@ class UMPS(nn.Module):
         self.input_nn_out_size = input_nn_out_size
         self.input_nn_kwargs = input_nn_kwargs
         self.dtype = dtype
+        self.batch_max_parallel = batch_max_parallel
 
         self.feature_dim = dataset[0][0].shape[-1] - 1
         self.output_dim = dataset[0][1].shape[-1]
@@ -114,7 +116,16 @@ class UMPS(nn.Module):
         
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         """
+        
+        factor = self.batch_max_parallel
 
+        output = [self._forward(inputs[ii:ii+factor]) for ii in range(0, inputs.shape[0], factor)]
+        output = torch.cat(output, dim=0)
+
+        return output
+        
+
+    def _forward(self, inputs: torch.Tensor):
         #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
         #We need the FC nn to preserve this.
         nned_inputs = inputs[:,:,1:]
@@ -174,7 +185,8 @@ class MultiUMPS(nn.Module):
                 input_nn_kwargs=None,
                 output_n_umps:int=4,
                 output_depth:int=1,
-                output_nn_kwargs=None):
+                output_nn_kwargs=None,
+                batch_max_parallel=4):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -222,7 +234,8 @@ class MultiUMPS(nn.Module):
                 tensor_init=tensor_init,
                 input_nn_depth=input_nn_depth,
                 input_nn_out_size=input_nn_out_size,
-                input_nn_kwargs=input_nn_kwargs) for _ in range(output_n_umps)])
+                input_nn_kwargs=input_nn_kwargs,
+                batch_max_parallel=batch_max_parallel) for _ in range(output_n_umps)])
 
 
     def forward(self, inputs: torch.Tensor):
