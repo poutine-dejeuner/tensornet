@@ -159,7 +159,7 @@ class Regressor(pl.LightningModule):
         # For the UMPS, display the sum of the absolute value of the tensor
         if isinstance(self.model, UMPS):
             self.logger.experiment.add_image('tensor_ABS_SUM/val', 
-                    torch.sum(torch.abs(self.model.tensor_core), dim=1), cur_epoch, dataformats='HW')c
+                    torch.sum(torch.abs(self.model.tensor_core), dim=1), cur_epoch, dataformats='HW')
 
         # For the MultiUMPS, display the sum of the absolute value of each tensor
         elif isinstance(self.model, MultiUMPS):

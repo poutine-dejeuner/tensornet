@@ -199,11 +199,11 @@ class MultiUMPS(nn.Module):
 
         # Initializing neural network layers for the outputs
         output_nn_kwargs = {} if output_nn_kwargs is None else output_nn_kwargs
-        nn_size = output_dim * output_n_umps
+        nn_size = self.output_dim * output_n_umps
         self.output_nn = SimpleFeedForwardNN(
                                 depth=output_depth, 
                                 in_size=nn_size, 
-                                out_size=nn_size,
+                                out_size=self.output_dim,
                                 activation='relu', last_activation='none', 
                                 **output_nn_kwargs)
         
