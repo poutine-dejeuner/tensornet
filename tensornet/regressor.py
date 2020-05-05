@@ -10,9 +10,8 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import List
 from ivbase.nn.base import FCLayer
 
-from tensornet.dataset import MolDataset
-from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor, normalise
-from tensornet.umps import UMPS
+from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
+from tensornet.umps import UMPS, MultiUMPS
 
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
@@ -23,12 +22,12 @@ class Regressor(pl.LightningModule):
     def __init__(self, 
                 model: torch.nn.Module,
                 dataset,
-                transform=None,
                 lr: float=1e-4,
                 batch_size: int=4,
                 validation_split: float=0.2,
                 random_seed: int=42,
-                num_workers: int=1
+                num_workers: int=1,
+                dtype = torch.float,
                 ):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
@@ -43,15 +42,16 @@ class Regressor(pl.LightningModule):
         super().__init__()
         
         # Basic attributes
-        self.model = model
-        self.dataset = dataset
+        self.model = model.to(dtype)
+        self.dataset = dataset.to(dtype)
         self.lr = lr
         self.batch_size = batch_size
         self.validation_split = validation_split
         self.random_seed = random_seed
-        self.num_workers = num_workers
-        self.transform = transform
-        
+        self.num_workers = num_workers        
+        self.dtype = dtype
+
+        self.to(dtype)
         
 
     def _collate_with_padding(self, inputs):
@@ -68,7 +68,7 @@ class Regressor(pl.LightningModule):
             collated_tensors_x[ii, :tensor.shape[1], :] = tensor
 
         # Stack the input tensor_y
-        collated_tensors_y = torch.stack(tensors_y, dim=0)
+        collated_tensors_y = torch.cat(tensors_y, dim=0)
 
         return collated_tensors_x, collated_tensors_y
 
@@ -116,38 +116,53 @@ class Regressor(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        predictions = self(x)
-        loss = F.mse_loss(predictions,y)
-        mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
-        tensorboard_logs = {'loss_MSE/train': loss, 'MAE/train': mae}
+        preds = self(x)
+        scaler = self.dataset.scaler
+        preds_inv = scaler.inverse_transform(preds.clone().detach())
+        loss = F.mse_loss(preds,y)
+        mae = F.l1_loss(preds, y)
+        
+        mae_global = F.l1_loss(preds_inv, scaler.inverse_transform(y))
+        tensorboard_logs = {'MSE_loss/train': loss, 'MAE_norm/train': mae, 'MAE_global/train': mae_global}
 
         return {'loss': loss, 'log': tensorboard_logs}
 
+
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        predictions = self(x)
-        loss = F.mse_loss(predictions,y)
-        mae = F.l1_loss(self.transform.inverse(predictions),self.transform.inverse(y))
-        tensorboard_logs = {'loss_MSE/val': loss, 'MAE/val': mae}
+        preds = self(x)
+        scaler = self.dataset.scaler
+        preds_inv = scaler.inverse_transform(preds.clone().detach())
+        loss = F.mse_loss(preds,y)
+        mae = F.l1_loss(preds, y)
+
+        mae_global = F.l1_loss(preds_inv, scaler.inverse_transform(y))
+        tensorboard_logs = {'MSE_loss/val': loss, 'MAE_norm/val': mae, 'MAE_global/val': mae_global}
 
         return {'log': tensorboard_logs}
 
 
     def validation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['log']['loss_MSE/val'] for x in outputs]).mean()
-        avg_mae = torch.stack([x['log']['MAE/val'] for x in outputs]).mean()
-        
-        
 
-        tensorboard_logs = {'loss_MSE/val': avg_loss, 'MAE/val': avg_mae}
-
+        log_dict = {}
+        for out in outputs:
+            for log_key, log_val in out['log'].items():
+                if log_key not in log_dict.keys():
+                    log_dict[log_key] = []
+                log_dict[log_key].append(log_val)
         
+        tensorboard_logs = {log_key: torch.stack(log_val).mean() for log_key, log_val in log_dict.items()}
+        
+        cur_epoch = self.current_epoch + 1 if self.global_step > 0 else 0
 
         if isinstance(self.model, UMPS):
-            epoch = self.current_epoch + 1 if self.global_step > 0 else 0
-            
             self.logger.experiment.add_image('tensor_ABS_SUM/val', 
-                    torch.sum(torch.abs(self.model.tensor_core), dim=1), epoch, dataformats='HW')
+                    torch.sum(torch.abs(self.model.tensor_core), dim=1), cur_epoch, dataformats='HW')
+        elif isinstance(self.model, MultiUMPS):
+            for ii, sub_model in enumerate(self.model.umps):
+                self.logger.experiment.add_image(f'tensor_ABS_SUM/val_{ii}', 
+                    torch.sum(torch.abs(sub_model.tensor_core), dim=1), cur_epoch, dataformats='HW')
+
 
         return {'log': tensorboard_logs}
 

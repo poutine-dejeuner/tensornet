@@ -11,7 +11,7 @@ from typing import List
 from ivbase.nn.base import FCLayer
 
 from tensornet.dataset import MolDataset
-from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor, normalise
+from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
 
 
 tn.set_default_backend("pytorch")
@@ -27,7 +27,8 @@ class UMPS(nn.Module):
                 tensor_init='eye',
                 input_nn_depth:int=0,
                 input_nn_out_size:int=32,
-                input_nn_kwargs=None):
+                input_nn_kwargs=None,
+                dtype=torch.float):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -53,6 +54,7 @@ class UMPS(nn.Module):
         self.input_nn_depth = input_nn_depth
         self.input_nn_out_size = input_nn_out_size
         self.input_nn_kwargs = input_nn_kwargs
+        self.dtype = dtype
         
         #The tensor core of the UMPS is initialized. An identity matrix is
         #constructed and concatenated to tensor_core to construct the batch_core.
@@ -61,8 +63,8 @@ class UMPS(nn.Module):
         tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim 
         tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
                                                                                     opt=tensor_init)
-        eye = torch.eye(bond_dim,bond_dim, requires_grad = False)
-        batch_core = torch.zeros(bond_dim, tensor_num_feats + 1, bond_dim)
+        eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float)
+        batch_core = torch.zeros(bond_dim, tensor_num_feats + 1, bond_dim, dtype=torch.float)
         batch_core[:, 0, :] = eye
         batch_core[:, 1:, :] = tensor_core[:, :, :]
         self.tensor_core = torch.nn.Parameter(batch_core)
@@ -76,7 +78,7 @@ class UMPS(nn.Module):
                                             requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
-        self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]))
+        self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]).float())
 
         # Initializing neural network layers for the inputs
         input_nn_kwargs = {} if input_nn_kwargs is None else input_nn_kwargs
@@ -99,6 +101,9 @@ class UMPS(nn.Module):
                                                                 bias=False, **input_nn_kwargs))
         else:
             raise ValueError('`input_nn_depth` must be a positive integer')
+
+        self.to(dtype)
+        pass
         
 
     def forward(self, inputs: torch.Tensor):
@@ -119,7 +124,7 @@ class UMPS(nn.Module):
         for fc_layer in self.fc_input_layers:
             nned_inputs = fc_layer(nned_inputs)
         d1,d2,d3 = nned_inputs.shape
-        new_inputs = torch.zeros(d1,d2,d3+1)
+        new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype)
         new_inputs[:,:,0] = inputs[:,:,0]
         new_inputs[:,:,1:] = nned_inputs
         inputs = new_inputs
@@ -150,9 +155,14 @@ class UMPS(nn.Module):
         tn.Node(self.alpha, name = 'alpha')[0]^node_list[0][0]
         tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
 
-        output = evaluate_input(input_node_list, input_list).tensor
+        output = evaluate_input(input_node_list, input_list, dtype=self.dtype).tensor
 
         return output
+
+    def to(self, dtype):
+        super().to(dtype)
+        self.dtype = dtype
+        return self
 
 
 
@@ -239,5 +249,10 @@ class MultiUMPS(nn.Module):
         
         return output
 
-
+    def to(self, dtype):
+        super().to(dtype)
+        for net in self.umps:
+            net.to(dtype)
+        
+        return self
 

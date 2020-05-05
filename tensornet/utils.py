@@ -1,15 +1,17 @@
 import torch
 import tensornetwork as tn
+import numpy as np
 import pandas as pd
 import math
 
-def create_tensor(shape, opt='eye', **kwargs):
+def create_tensor(shape, opt='eye', dtype=torch.float, **kwargs):
     if opt == 'eye':
-        return random_tensor(shape, **kwargs)
+        tensor = random_tensor(shape, **kwargs)
     elif opt == 'norm':
         tensor = torch.randn(shape, **kwargs)
         tensor = tensor / tensor_norm(tensor)
-        return tensor
+    
+    return tensor.to(dtype)
 
 def random_tensor(shape, std = 1e-8, **kwargs):
     
@@ -19,7 +21,7 @@ def random_tensor(shape, std = 1e-8, **kwargs):
     ten = ten + noise
     return ten
 
-def evaluate_input(node_list, input_list):
+def evaluate_input(node_list, input_list, dtype=torch.float):
     """
     Contract input vectors with tensor network to get scalar output
 ​
@@ -47,7 +49,7 @@ def evaluate_input(node_list, input_list):
         assert all(i.shape[0] == batch_dim for i in input_list)
 
         # Generate copy node for dealing with batch dims
-        batch_edges = batch_node(num_cores, batch_dim)
+        batch_edges = batch_node(num_cores, batch_dim, dtype=dtype)
         assert len(batch_edges) == num_cores + 1
         
 
@@ -74,9 +76,9 @@ def evaluate_input(node_list, input_list):
     free_edges = tuple(free_edges)
     contractor = tn.contractors.auto
 
-    return contractor(net, free_edges)            
+    return contractor(net, free_edges)
 
-def batch_node(num_inputs, batch_dim):
+def batch_node(num_inputs, batch_dim, dtype=torch.float):
     """
     Return a network of small CopyNodes which emulates a large CopyNode
     ​
@@ -97,9 +99,15 @@ def batch_node(num_inputs, batch_dim):
     # input nodes will be connected to a copy node with 3 edges thus reducing
     # the number of free edges by one each times and this process is repeated 
     # iteratively until only one free edge remains.
+
+    dtype_mapping = {torch.float32: np.float32, torch.float64: np.float64, torch.int64: np.int64,
+                    torch.int32: np.int32, torch.int16: np.int16}
+
+    numpy_dtype = dtype_mapping[dtype]
+
     num_edges = num_inputs + 1
     if num_edges < 4:
-        node = tn.CopyNode(rank=num_edges, dimension=batch_dim, name = 'copy')
+        node = tn.CopyNode(rank=num_edges, dimension=batch_dim, name = 'copy', dtype=numpy_dtype)
         return node.get_all_edges()
     
     # Initialize list of free edges with output of trivial identity mats
@@ -116,7 +124,7 @@ def batch_node(num_inputs, batch_dim):
         # Apply third order tensor to contract two dummy indices together
         temp_list = []
         for i in range(half_len):
-            temp_node = tn.CopyNode(rank=3, dimension=batch_dim, name = 'copy')
+            temp_node = tn.CopyNode(rank=3, dimension=batch_dim, name = 'copy', dtype=numpy_dtype)
             temp_node[1] ^ dummy_list[2 * i]
             temp_node[2] ^ dummy_list[2 * i + 1]
             temp_list.append(temp_node[0])
@@ -127,7 +135,7 @@ def batch_node(num_inputs, batch_dim):
         dummy_len = len(dummy_list)
     
     # Contract the last dummy indices together
-    last_node = tn.CopyNode(rank=dummy_len, dimension=batch_dim, name = 'last copy')
+    last_node = tn.CopyNode(rank=dummy_len, dimension=batch_dim, name = 'last copy', dtype=numpy_dtype)
     [last_node[i] ^ dummy_list[i] for i in range(dummy_len)]
     
     return edge_list
@@ -140,16 +148,33 @@ def tensor_norm(tensor):
 
     return norm
 
-class normalise():
-    def __init__(self, datapath):
-        df  = pd.read_csv(datapath)
-        mean = torch.Tensor(df.mean().to_numpy())
-        std = torch.Tensor(df.std().to_numpy())
-        self.mean = mean
-        self.std = std
 
-    def __call__(self, tensor):
-        return (tensor - self.mean)/self.std
+class TorchScalerWrapper():
+    def __init__(self, scaler, dtype=torch.float32):
+        self.scaler = scaler
+        self.dtype = dtype
+    
+    def partial_fit(self, X, y=None):
+        self.scaler.partial_fit(X, y)
+        return self
 
-    def inverse(self, tensor):
-        return tensor*self.std + self.mean
+    def fit(self, X, y=None):
+        self.scaler.fit(X, y)
+        return self
+
+    def transform(self, X):
+        vals = self.scaler.transform(X)
+        return torch.Tensor(vals).to(self.dtype)
+
+
+    def is_fitted(self):
+        return self.is_fitted()
+
+    def inverse_transform(self, X):
+        vals = self.scaler.inverse_transform(X)
+        return torch.Tensor(vals).to(self.dtype)
+
+    def to(self, dtype):
+        self.dtype = dtype
+        return self
+
