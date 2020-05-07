@@ -112,7 +112,9 @@ class Regressor(pl.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
-
+        #torch.optim.RMSprop(self.parameters(), lr=0.01, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0, centered=False)
+        #torch.optim.SparseAdam(self.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08)
+        #torch.optim.SGD(self.parameters(), lr=self.lr, momentum=0, dampening=0, weight_decay=0, nesterov=False)
 
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
         # Get the truth `y`, predictions and compute the MSE and MAE
