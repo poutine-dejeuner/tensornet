@@ -8,6 +8,7 @@ from tensornet.regressor import Regressor
 from tensornet.umps import UMPS, MultiUMPS
 from tensornet.dataset import MolDataset, CosineDataset
 from tensornet.utils import TorchScalerWrapper
+from tensornet.basemodels import LSTMPredictor
 
 import tensornet
 
@@ -31,21 +32,22 @@ if __name__ == "__main__":
 
     # datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/cosine_dataset_len-30-30_num-freq-3.csv')
     # dataset = CosineDataset(datapath, scaler=scaler, features_prefix='feat_', labels_prefix=['amplitude_'])
-    
-    model = UMPS(dataset=dataset, bond_dim = 50, tensor_init='eye',
+
+    model = UMPS(dataset=dataset, bond_dim = 100, tensor_init='eye',
                 input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=1)
     #model = MultiUMPS(dataset=dataset, bond_dim = 50, tensor_init='eye',
     #             input_nn_depth=1, input_nn_out_size=32, output_n_umps=16, output_depth=1)
     
-    model = LSTMPredictor(dataset=dataset, 
-                    lstm_depth=2, lstm_hidden_size=100, lstm_bidirectional=True, lstm_kwargs=None, 
-                    out_nn_depth=1, out_nn_kwargs=None)
+    #model = LSTMPredictor(dataset=dataset, 
+    #                lstm_depth=2, lstm_hidden_size=100, lstm_bidirectional=True, lstm_kwargs=None, 
+    #                out_nn_depth=1, out_nn_kwargs=None)
     
     num_workers = os.cpu_count()
-    regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=16,
-                validation_split=0.2, random_seed=RANDOM_SEED, num_workers=num_workers, dtype=DTYPE)
+    regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=64, 
+                validation_split=0.2, random_seed=RANDOM_SEED, 
+                num_workers=num_workers, dtype=DTYPE)
 
-    trainer = Trainer(gpus=gpus, min_epochs=50, max_epochs=50)
+    trainer = Trainer(gpus=gpus, min_epochs=20, max_epochs=20)
     trainer.fit(regressor)
 
 

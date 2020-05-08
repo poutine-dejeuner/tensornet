@@ -55,22 +55,33 @@ class Regressor(pl.LightningModule):
         
 
     def _collate_with_padding(self, inputs):
-        tensors_x, tensors_y = zip(*inputs)
 
-        # Generate input feature tensor, with only empty strings denoted by the one-hot vector [1, 0, 0, ...., 0]
-        max_input_len = max([tensor.shape[1] for tensor in tensors_x])
-        collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), 
-                                                                dtype=tensors_x[0].dtype)
-        collated_tensors_x[:, :, 0] = 1
-        
-        # Replace the non-empty one-hot by the input tensor_x
-        for ii, tensor in enumerate(tensors_x):
-            collated_tensors_x[ii, :tensor.shape[1], :] = tensor
+        factor = self.model.batch_max_parallel
+        mini_batch_len = self.batch_size/factor
+        assert mini_batch_len.is_integer()
+        mini_batch_len = int(mini_batch_len)
 
-        # Stack the input tensor_y
-        collated_tensors_y = torch.cat(tensors_y, dim=0)
+        mini_batch_list = [inputs[k*factor : (k + 1)*factor] for k in range(mini_batch_len)]
 
-        return collated_tensors_x, collated_tensors_y
+        mini_batch_collated_inputs = []
+        for mini_batch in mini_batch_list:
+            tensors_x, tensors_y = zip(*mini_batch)
+
+            # Generate input feature tensor, with only empty strings denoted by the one-hot vector [1, 0, 0, ...., 0]
+            max_input_len = max([tensor.shape[1] for tensor in tensors_x])
+            collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), 
+                                                                    dtype=tensors_x[0].dtype)
+            collated_tensors_x[:, :, 0] = 1
+            
+            # Replace the non-empty one-hot by the input tensor_x
+            for ii, tensor in enumerate(tensors_x):
+                collated_tensors_x[ii, :tensor.shape[1], :] = tensor
+
+            # Stack the input tensor_y
+            collated_tensors_y = torch.cat(tensors_y, dim=0)
+            mini_batch_collated_inputs.append((collated_tensors_x, collated_tensors_y))
+
+        return mini_batch_collated_inputs
 
 
     def forward(self, inputs: torch.Tensor):
@@ -103,10 +114,10 @@ class Regressor(pl.LightningModule):
 
 
     def train_dataloader(self):
-        num_workers = self.num_workers #os.cpu_count()
+        num_workers = self.num_workers 
         train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.train_sampler,
-                 collate_fn=self._collate_with_padding)
+                 collate_fn=self._collate_with_padding, drop_last=True)
         return train_loader
 
 
@@ -118,11 +129,16 @@ class Regressor(pl.LightningModule):
 
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
         # Get the truth `y`, predictions and compute the MSE and MAE
-        x, y = batch
-        preds = self(x)
-        scaler = self.dataset.scaler
-        loss = F.mse_loss(preds,y)
-        mae = F.l1_loss(preds, y)
+        loss = mae = 0
+        for mini_batch in batch:
+            x, y = mini_batch
+            preds = self(x)
+            scaler = self.dataset.scaler
+            loss += F.mse_loss(preds,y)
+            mae += F.l1_loss(preds, y)
+
+        loss = loss/self.batch_size
+        mae = mae/self.batch_size
         
         tensorboard_logs = {f'MSE_loss/{step_name}': loss, f'MAE_norm/{step_name}': mae}
 
@@ -177,7 +193,7 @@ class Regressor(pl.LightningModule):
         num_workers = self.num_workers
         valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.valid_sampler,
-                 collate_fn=self._collate_with_padding)
+                 collate_fn=self._collate_with_padding, drop_last=True)
         return valid_loader
         
         
