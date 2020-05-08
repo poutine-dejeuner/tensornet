@@ -1,4 +1,4 @@
-import os
+import os, math
 import torch
 import numpy as np
 import tensornetwork as tn
@@ -73,9 +73,14 @@ class Regressor(pl.LightningModule):
                                                                     dtype=tensors_x[0].dtype)
             collated_tensors_x[:, :, 0] = 1
             
-            # Replace the non-empty one-hot by the input tensor_x
+            # Replace the non-empty one-hot by the input tensor_x. The tensor is placed in 
+            #collated_tensors_x at a position such that the output node will end up between 
+            # the inputs at position len(tensor)//2 and len(tensor)//2 + 1
             for ii, tensor in enumerate(tensors_x):
-                collated_tensors_x[ii, :tensor.shape[1], :] = tensor
+                input_len = tensor.shape[1]
+                begin = math.floor((max_input_len-input_len)/2)
+                end = max_input_len - math.ceil((max_input_len-input_len)/2)
+                collated_tensors_x[ii, begin:end, :] = tensor
 
             # Stack the input tensor_y
             collated_tensors_y = torch.cat(tensors_y, dim=0)

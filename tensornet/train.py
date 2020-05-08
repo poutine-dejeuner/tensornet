@@ -34,7 +34,7 @@ if __name__ == "__main__":
     # dataset = CosineDataset(datapath, scaler=scaler, features_prefix='feat_', labels_prefix=['amplitude_'])
 
     model = UMPS(dataset=dataset, bond_dim = 100, tensor_init='eye',
-                input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=1)
+                input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=8)
     #model = MultiUMPS(dataset=dataset, bond_dim = 50, tensor_init='eye',
     #             input_nn_depth=1, input_nn_out_size=32, output_n_umps=16, output_depth=1)
     
@@ -43,11 +43,11 @@ if __name__ == "__main__":
     #                out_nn_depth=1, out_nn_kwargs=None)
     
     num_workers = os.cpu_count()
-    regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=64, 
+    regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=16, 
                 validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE)
 
-    trainer = Trainer(gpus=gpus, min_epochs=20, max_epochs=20)
+    trainer = Trainer(gpus=gpus, min_epochs=100, max_epochs=100)
     trainer.fit(regressor)
 
 
