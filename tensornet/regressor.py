@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from typing import List
+from typing import List, Any
 from ivbase.nn.base import FCLayer
 
 from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
@@ -22,6 +22,7 @@ class Regressor(pl.LightningModule):
     def __init__(self, 
                 model: torch.nn.Module,
                 dataset,
+                loss_fun,
                 lr: float=1e-4,
                 batch_size: int=4,
                 validation_split: float=0.2,
@@ -44,6 +45,7 @@ class Regressor(pl.LightningModule):
         # Basic attributes
         self.model = model.to(dtype)
         self.dataset = dataset.to(dtype)
+        self.loss_fun = loss_fun
         self.lr = lr
         self.batch_size = batch_size
         self.validation_split = validation_split
@@ -54,7 +56,8 @@ class Regressor(pl.LightningModule):
         self.to(dtype)
         
 
-    def _collate_with_padding(self, inputs):
+    def _collate_with_padding(self, 
+                                inputs: List[torch.Tensor]) -> List[torch.Tensor]:
 
         factor = self.model.batch_max_parallel
         mini_batch_len = self.batch_size/factor
@@ -75,7 +78,8 @@ class Regressor(pl.LightningModule):
             
             # Replace the non-empty one-hot by the input tensor_x. The tensor is placed in 
             #collated_tensors_x at a position such that the output node will end up between 
-            # the inputs at position len(tensor)//2 and len(tensor)//2 + 1
+            # the inputs at position begin = math.floor((max_input_len-input_len)/2) and 
+            #end = max_input_len - math.ceil((max_input_len-input_len)/2)
             for ii, tensor in enumerate(tensors_x):
                 input_len = tensor.shape[1]
                 begin = math.floor((max_input_len-input_len)/2)
@@ -89,7 +93,7 @@ class Regressor(pl.LightningModule):
         return mini_batch_collated_inputs
 
 
-    def forward(self, inputs: torch.Tensor):
+    def forward(self, inputs: List[torch.Tensor]):
         """
         Takes a batch input tensor, computes the number of inputs, creates a UMPS
         of length length equal to the number of inputs, connects the input nodes
@@ -137,10 +141,11 @@ class Regressor(pl.LightningModule):
         loss = mae = 0
         for mini_batch in batch:
             x, y = mini_batch
-            preds = self(x)
+            scores = self(x)
+            
             scaler = self.dataset.scaler
-            loss += F.mse_loss(preds,y)
-            mae += F.l1_loss(preds, y)
+            loss += self.loss_fun(preds,y, reduction='sum')
+            mae += F.l1_loss(preds, y, reduction='sum')
 
         loss = loss/self.batch_size
         mae = mae/self.batch_size

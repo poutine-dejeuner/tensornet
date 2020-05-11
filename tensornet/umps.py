@@ -54,7 +54,11 @@ class UMPS(nn.Module):
         self.batch_max_parallel = batch_max_parallel
 
         self.feature_dim = dataset[0][0].shape[-1] - 1
-        self.output_dim = dataset[0][1].shape[-1]
+        
+        try:
+            self.output_dim = dataset[0][1].shape[-1]
+        except Exception:
+            self.output_dim = 0
 
         #The tensor core of the UMPS is initialized. An identity matrix is
         #constructed and concatenated to tensor_core to construct the batch_core.

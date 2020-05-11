@@ -33,8 +33,8 @@ if __name__ == "__main__":
     # datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/cosine_dataset_len-30-30_num-freq-3.csv')
     # dataset = CosineDataset(datapath, scaler=scaler, features_prefix='feat_', labels_prefix=['amplitude_'])
 
-    model = UMPS(dataset=dataset, bond_dim = 100, tensor_init='eye',
-                input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=8)
+    model = UMPS(dataset=dataset, bond_dim = 200, tensor_init='eye',
+                input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=4)
     #model = MultiUMPS(dataset=dataset, bond_dim = 50, tensor_init='eye',
     #             input_nn_depth=1, input_nn_out_size=32, output_n_umps=16, output_depth=1)
     
