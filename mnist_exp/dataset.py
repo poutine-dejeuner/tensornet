@@ -18,8 +18,8 @@ class MNIST(datasets.MNIST):
         image, number = super().__getitem__(idx)
         number = [str(number)]
         image = image.type(self.dtype)
-        number = self.seq_transfo(number).type(self.dtype)
-        return image, number.squeeze(0)
+        onehot = self.seq_transfo(number).type(self.dtype)
+        return image, onehot.squeeze(0)
 
     def to(self, dtype):
         self.dtype = dtype

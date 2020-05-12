@@ -12,3 +12,5 @@ data/
 tensornet.egg-info/
 
 runs/
+
+mnist/

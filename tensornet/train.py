@@ -43,8 +43,8 @@ if __name__ == "__main__":
     #                out_nn_depth=1, out_nn_kwargs=None)
     
     num_workers = os.cpu_count()
-    regressor = Regressor(model=model, dataset=dataset, lr=1e-3, batch_size=16, 
-                validation_split=0.2, random_seed=RANDOM_SEED, 
+    regressor = Regressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
+                lr=1e-3, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE)
 
     trainer = Trainer(gpus=gpus, min_epochs=100, max_epochs=100)
