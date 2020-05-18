@@ -25,13 +25,12 @@ if __name__ == "__main__":
     else:
         gpus = None
 
-    transform = transforms.ToTensor()
-    dataset = dataset.MNIST(dtype = DTYPE, root = './mnist', download=True, transform=transform)
+    dataset = dataset.MNIST(dtype = DTYPE, root = './mnist', download=True)
     
     model = UMPS(dataset=dataset, bond_dim = 20, tensor_init='eye',
-                input_nn_depth=1, input_nn_out_size=8, batch_max_parallel=4)
+                input_nn_depth=0, input_nn_out_size=8, batch_max_parallel=4)
     
-    num_workers = os.cpu_count()
+    num_workers = 0 #os.cpu_count()
     regressor = ClassifyRegressor(model=model, dataset=dataset, loss_fun = torch.nn.functional.cross_entropy, 
                 lr=1e-3, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE)

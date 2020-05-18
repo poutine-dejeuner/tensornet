@@ -70,7 +70,8 @@ class Regressor(pl.LightningModule):
         for mini_batch in mini_batch_list:
             tensors_x, tensors_y = zip(*mini_batch)
 
-            # Generate input feature tensor, with only empty strings denoted by the one-hot vector [1, 0, 0, ...., 0]
+            # Generate input feature tensor, with only empty strings denoted by the one-hot vector
+            # [1, 0, 0,..., 0]
             max_input_len = max([tensor.shape[1] for tensor in tensors_x])
             collated_tensors_x = torch.zeros((len(tensors_x), max_input_len, tensors_x[0].shape[2]), 
                                                                     dtype=tensors_x[0].dtype)

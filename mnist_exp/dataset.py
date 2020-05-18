@@ -1,4 +1,5 @@
 import torch
+import math
 
 from torchvision import transforms, datasets
 from torch.utils.data import Dataset
@@ -17,9 +18,19 @@ class MNIST(datasets.MNIST):
     def __getitem__(self, idx):
         image, number = super().__getitem__(idx)
         number = [str(number)]
+        onehot = self.seq_transfo(number).type(self.dtype).squeeze(0)
+
+        transform = transforms.ToTensor()
+        image = transform(image).squeeze().unsqueeze(2)
         image = image.type(self.dtype)
-        onehot = self.seq_transfo(number).type(self.dtype)
-        return image, onehot.squeeze(0)
+        cos = torch.cos(image*math.pi/2)
+        sin = torch.sin(image*math.pi/2 )
+        image = torch.stack((cos,sin),2).squeeze()
+        shape = image.shape
+        image = image.reshape(shape[0]*shape[1],2)
+        image = image.unsqueeze(0)
+
+        return image, onehot
 
     def to(self, dtype):
         self.dtype = dtype
@@ -28,6 +39,7 @@ class MNIST(datasets.MNIST):
         return self
 
 if __name__=='__main__':
-    transform = transforms.ToTensor()
-    data = MNIST(dtype = torch.float, root  = './mnist',download=True, transform=transform)
-    print(data.__getitem__(0))
+    
+    data = MNIST(dtype = torch.float, root  = './mnist',download=True)
+    item=data.__getitem__(0)
+    print(item)
