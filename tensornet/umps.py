@@ -53,6 +53,8 @@ class UMPS(nn.Module):
         self.input_nn_kwargs = input_nn_kwargs
         self.dtype = dtype
         self.batch_max_parallel = batch_max_parallel
+        self.output_nn_size = 32
+        self.output_nn_depth = 0
         
         assert(output_node_position in {'center', 'end'})
         self.output_node_position = output_node_position
@@ -90,6 +92,10 @@ class UMPS(nn.Module):
             self.output_core = create_tensor((bond_dim, self.output_dim), 
                                             requires_grad=True, opt='eye')
 
+        
+        output_size = self.output_nn_size if self.output_nn_depth > 0 else self.output_dim
+        self.output_core = create_tensor((bond_dim, output_size, bond_dim), 
+                                            requires_grad=True, opt='norm')
         self.output_core = torch.nn.Parameter(self.output_core)
 
         self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]).float())
@@ -99,6 +105,12 @@ class UMPS(nn.Module):
         self.input_nn = SimpleFeedForwardNN(
                                         depth=input_nn_depth, in_size=self.feature_dim, 
                                         out_size=input_nn_out_size,
+                                        activation='relu', last_activation='none', 
+                                        **input_nn_kwargs)
+        
+        self.output_nn = SimpleFeedForwardNN(
+                                        depth=self.output_nn_depth, in_size=self.output_nn_size, 
+                                        out_size=self.output_dim,
                                         activation='relu', last_activation='none', 
                                         **input_nn_kwargs)
 
@@ -120,6 +132,8 @@ class UMPS(nn.Module):
         
         factor = self.batch_max_parallel
 
+        # self.tensor_core.data = self.tensor_core / tensor_norm(self.tensor_core)
+
         output = [self._forward(inputs[ii:ii+factor]) for ii in range(0, inputs.shape[0], factor)]
         output = torch.cat(output, dim=0)
 
@@ -127,6 +141,7 @@ class UMPS(nn.Module):
         
 
     def _forward(self, inputs: torch.Tensor):
+
         #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
         #We need the FC nn to preserve this.
         nned_inputs = inputs[:,:,1:]
@@ -170,6 +185,8 @@ class UMPS(nn.Module):
             tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
 
         output = evaluate_input(input_node_list, input_list, dtype=self.dtype).tensor
+
+        output = self.output_nn(output)
 
         return output
 
