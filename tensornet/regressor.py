@@ -44,7 +44,7 @@ class Regressor(pl.LightningModule):
         
         # Basic attributes
         self.model = model.to(dtype)
-        self.dataset = dataset.to(dtype)
+        self.dataset = dataset#.to(dtype)
         self.loss_fun = loss_fun
         self.lr = lr
         self.batch_size = batch_size
@@ -210,15 +210,27 @@ class ClassifyRegressor(Regressor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def prepare_data(self):
+        
+        # Creating data indices for training and validation splits:
+        dataset_size = 100
+        indices = list(range(dataset_size))
+        split = int(np.floor(self.validation_split * dataset_size))
+        np.random.shuffle(indices)
+        train_indices, val_indices = indices[split:], indices[:split]
+
+        # Creating data samplers and loaders:
+        self.train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_indices)
+        self.valid_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_indices)
+
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
         # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = accuracy = 0
+        loss = 0
         for mini_batch in batch:
             x, y = mini_batch
             scores = self(x)
             _, preds = torch.max(scores,1)
             _, numbers = torch.max(y,1)      
-            scaler = self.dataset.scaler
             loss += self.loss_fun(scores,numbers,reduction='sum')             
 
         loss = loss/self.batch_size
@@ -226,10 +238,11 @@ class ClassifyRegressor(Regressor):
         tensorboard_logs = {f'MSE_loss': loss}
 
         # If there is a scaler, reverse the scaling and compute the MAE
-        if scaler is not None:
-            preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-            y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-            tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+        if hasattr(self.dataset,'scaler'):
+            if self.dataset.scaler is not None:
+                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 
         return {'loss': loss, 'log': tensorboard_logs}
 
@@ -240,8 +253,7 @@ class ClassifyRegressor(Regressor):
             x, y = mini_batch
             scores = self(x)
             _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1)      
-            scaler = self.dataset.scaler
+            _, numbers = torch.max(y,1) 
             loss += self.loss_fun(scores,numbers,reduction='sum')
             with torch.no_grad():
                 accuracy += torch.sum(preds == numbers).item()                
@@ -252,11 +264,13 @@ class ClassifyRegressor(Regressor):
         
         tensorboard_logs = {f'MSE_loss': loss, f'accuracy': accuracy}
 
-        # If there is a scaler, reverse the scaling and compute the MAE
-        if scaler is not None:
-            preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-            y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-            tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+        # If there is a scaler, reverse the scaling and compute the MAE      
+        if hasattr(self.dataset,'scaler'):
+            if self.dataset.scaler is not None:
+                scaler = self.dataset.scaler
+                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 
         return {'loss': loss, 'log': tensorboard_logs}
 
