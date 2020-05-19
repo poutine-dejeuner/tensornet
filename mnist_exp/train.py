@@ -3,6 +3,7 @@ from torchvision import transforms
 import tensornet
 
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 from ivbase.transformers.scaler import StandardScaler
 
 from tensornet.regressor import ClassifyRegressor
@@ -36,6 +37,8 @@ if __name__ == "__main__":
                 num_workers=num_workers, dtype=DTYPE)
 
     trainer = Trainer(gpus=gpus, min_epochs=20, max_epochs=20)
+    checkpoint_callback = ModelCheckpoint(filepath='~/code/models/{epoch}-{val_loss:.2f}-{batch_size:.2f}',
+            monitor='accuracy', save_top_k=5)
     trainer.fit(regressor)
 
 

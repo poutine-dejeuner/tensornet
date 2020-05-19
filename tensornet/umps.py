@@ -28,7 +28,8 @@ class UMPS(nn.Module):
                 input_nn_out_size:int=32,
                 input_nn_kwargs=None,
                 dtype=torch.float,
-                batch_max_parallel=4):
+                batch_max_parallel=4,
+                output_node_position='end'):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -52,6 +53,9 @@ class UMPS(nn.Module):
         self.input_nn_kwargs = input_nn_kwargs
         self.dtype = dtype
         self.batch_max_parallel = batch_max_parallel
+        
+        assert(output_node_position in {'center', 'end'})
+        self.output_node_position = output_node_position
 
         self.feature_dim = dataset[0][0].shape[-1] - 1
         
@@ -78,8 +82,14 @@ class UMPS(nn.Module):
         self.alpha = torch.nn.Parameter(self.alpha)
         self.omega = create_tensor((bond_dim), requires_grad=True, opt='norm')
         self.omega = torch.nn.Parameter(self.omega)
-        self.output_core = create_tensor((bond_dim, self.output_dim, bond_dim), 
-                                            requires_grad=True, opt='norm')
+
+        if self.output_node_position == 'center':
+            self.output_core = create_tensor((bond_dim, self.output_dim, bond_dim), 
+                                            requires_grad=True, opt='eye')
+        elif self.output_node_position == 'end':
+            self.output_core = create_tensor((bond_dim, self.output_dim), 
+                                            requires_grad=True, opt='eye')
+
         self.output_core = torch.nn.Parameter(self.output_core)
 
         self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]).float())
@@ -140,9 +150,12 @@ class UMPS(nn.Module):
         if self.output_dim > 0:
             output_node = tn.Node(self.output_core, name = 'output') 
 
-            #add output node at the center of the input nodes
-            node_list = input_node_list.copy()
-            node_list.insert(input_len//2, output_node)
+            if self.output_node_position == 'center':
+                #add output node at the center of the input nodes
+                node_list = input_node_list.copy()
+                node_list.insert(input_len//2, output_node)
+            elif self.output_node_position == 'end':
+                node_list = input_node_list + [output_node]
         elif self.output_dim == 0:
             node_list = input_node_list
 
@@ -152,7 +165,9 @@ class UMPS(nn.Module):
 
         #connect the alpha and omega nodes to the first and last nodes
         tn.Node(self.alpha, name = 'alpha')[0]^node_list[0][0]
-        tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
+
+        if self.output_node_position != 'end':
+            tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
 
         output = evaluate_input(input_node_list, input_list, dtype=self.dtype).tensor
 
@@ -246,3 +261,8 @@ class MultiUMPS(nn.Module):
         
         return self
 
+if __name__=='__main__':
+    from tensornet.regressor import _collate_with_padding
+    from tensornet import dataset
+    
+     

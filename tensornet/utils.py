@@ -19,10 +19,15 @@ def create_tensor(shape, opt='eye', dtype=torch.float, **kwargs):
     return tensor.to(dtype)
 
 def random_tensor(shape, std = 1e-8, **kwargs):
-    
+    """
+    This method returns a tensor in the given shape. It is an eye matrix in dimensions (0,2) and
+    expanded in the 1 dimension. Some noise is added.
+    """
+    noise = math.sqrt(std)*torch.randn(shape, **kwargs)
+    if len(shape)==2:
+         return torch.eye(*shape) + noise
     ten = torch.eye(shape[0],shape[2]).reshape((shape[0], 1, shape[2]))
     ten = ten.expand(shape)
-    noise = math.sqrt(std)*torch.randn(shape, **kwargs)
     ten = ten + noise
     return ten
 

@@ -132,7 +132,7 @@ class Regressor(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
+        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=1)
         #torch.optim.RMSprop(self.parameters(), lr=0.01, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0, centered=False)
         #torch.optim.SparseAdam(self.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08)
         #torch.optim.SGD(self.parameters(), lr=self.lr, momentum=0, dampening=0, weight_decay=0, nesterov=False)
@@ -219,6 +219,29 @@ class ClassifyRegressor(Regressor):
             _, preds = torch.max(scores,1)
             _, numbers = torch.max(y,1)      
             scaler = self.dataset.scaler
+            loss += self.loss_fun(scores,numbers,reduction='sum')             
+
+        loss = loss/self.batch_size
+        
+        tensorboard_logs = {f'MSE_loss': loss}
+
+        # If there is a scaler, reverse the scaling and compute the MAE
+        if scaler is not None:
+            preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+            y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+            tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+
+        return {'loss': loss, 'log': tensorboard_logs}
+
+    def _get_val_logs(self, batch, batch_idx, step_name:str):
+        # Get the truth `y`, predictions and compute the MSE and MAE
+        loss = accuracy = 0
+        for mini_batch in batch:
+            x, y = mini_batch
+            scores = self(x)
+            _, preds = torch.max(scores,1)
+            _, numbers = torch.max(y,1)      
+            scaler = self.dataset.scaler
             loss += self.loss_fun(scores,numbers,reduction='sum')
             with torch.no_grad():
                 accuracy += torch.sum(preds == numbers).item()                
@@ -236,3 +259,10 @@ class ClassifyRegressor(Regressor):
             tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 
         return {'loss': loss, 'log': tensorboard_logs}
+
+    def training_step(self, batch, batch_idx):
+        return self._get_loss_logs(batch, batch_idx, step_name='train')
+
+ 
+    def validation_step(self, batch, batch_idx):
+        return self._get_val_logs(batch, batch_idx, step_name='val')

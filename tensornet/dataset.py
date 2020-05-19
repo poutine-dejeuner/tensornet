@@ -38,6 +38,8 @@ class MolDataset(Dataset):
         self.smiles = df[smiles_col].values.flatten()
 
         # Get the values
+        #columns = [0,1]
+        #self.values = df.iloc[:, 2:].values[:,columns]
         self.values = df.iloc[:, 2:].values
         
         self.vocabulary = ['#', '%', ')', '(', '+', '*', '-', '/', '.',
