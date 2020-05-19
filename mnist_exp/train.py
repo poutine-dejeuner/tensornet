@@ -28,7 +28,7 @@ if __name__ == "__main__":
         gpus = None
 
     dataset = dataset.MNIST(dtype = DTYPE, root = './mnist', download=True)
-    dataset = torch.utils.data.Subset(dataset, list(range(100)))
+    #dataset = torch.utils.data.Subset(dataset, list(range(100)))
     
     model = UMPS(dataset=dataset, bond_dim = 20, tensor_init='eye',
                 input_nn_depth=0, input_nn_out_size=8, batch_max_parallel=4)
@@ -39,7 +39,7 @@ if __name__ == "__main__":
                 num_workers=num_workers, dtype=DTYPE)
 
     profiler = pl.profiler.AdvancedProfiler()
-    trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=1, profiler=profiler)
+    trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=20, profiler=profiler)
     checkpoint_callback = ModelCheckpoint(filepath='~/code/models/{epoch}-{val_loss:.2f}-{batch_size:.2f}',
             monitor='accuracy', save_top_k=5)
     trainer.fit(regressor)

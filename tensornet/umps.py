@@ -94,8 +94,13 @@ class UMPS(nn.Module):
 
         
         output_size = self.output_nn_size if self.output_nn_depth > 0 else self.output_dim
-        self.output_core = create_tensor((bond_dim, output_size, bond_dim), 
+
+        if self.output_node_position == 'center':
+            self.output_core = create_tensor((bond_dim, output_size, bond_dim), 
                                             requires_grad=True, opt='norm')
+        elif self.output_node_position == 'end':
+            self.output_core = create_tensor((bond_dim, output_size), requires_grad=True, opt='norm')
+            
         self.output_core = torch.nn.Parameter(self.output_core)
 
         self.softmax_temperature = torch.nn.Parameter(torch.Tensor([10.0]).float())
@@ -144,16 +149,16 @@ class UMPS(nn.Module):
 
         #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
         #We need the FC nn to preserve this.
-        nned_inputs = inputs[:,:,1:]
-        nned_inputs = self.input_nn(nned_inputs)
-
-        d1,d2,d3 = nned_inputs.shape
-        new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
-        new_inputs[:,:,0] = inputs[:,:,0]
-        new_inputs[:,:,1:] = nned_inputs
-        inputs = new_inputs
-        # inputs = F.layer_norm(inputs, inputs.shape[-1:])
         if self.input_nn_depth > 0:
+            nned_inputs = inputs[:,:,1:]
+            nned_inputs = self.input_nn(nned_inputs)
+
+            d1,d2,d3 = nned_inputs.shape
+            new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
+            new_inputs[:,:,0] = inputs[:,:,0]
+            new_inputs[:,:,1:] = nned_inputs
+            inputs = new_inputs
+            # inputs = F.layer_norm(inputs, inputs.shape[-1:])
             inputs = F.softmax(inputs*self.softmax_temperature, dim=-1)
         
         #slice the inputs tensor in the input_len dimension
