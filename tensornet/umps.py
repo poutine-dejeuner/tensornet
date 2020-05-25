@@ -28,7 +28,7 @@ class UMPS(nn.Module):
                 input_nn_kwargs=None,
                 dtype=torch.float,
                 batch_max_parallel=4,
-                output_node_position='end'):
+                output_node_position='center'):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -222,22 +222,26 @@ class UMPS(nn.Module):
         #the result of the contraction is computed. We normalise the matrices
         #to stabilize the computations.
         #We compute the norm of the matrices in the (bond_dim,bond_dim) indices
-        matrix_norms = torch.zeros(batch_size, input_len, 1,1)
-        matrix_norms[:,:,0,0] = torch.norm(matrix_stack,dim=(2,3))/bond_dim
+        device = matrix_stack.device
+        matrix_norms = torch.zeros(batch_size, input_len, 1,1).to(device)
+        matrix_norms[:,:,0,0] = torch.norm(matrix_stack,p='nuc',dim=(2,3))/torch.Tensor([bond_dim]).to(device)
+
         #and divide the matrix_stack by their matrix_norms
         matrix_norms = matrix_norms.expand(batch_size,input_len,bond_dim,bond_dim)
         matrix_stack = matrix_stack/matrix_norms
         
+        #the order of the (batch_size, input_len) dimensions are inversed for use as 
+        #input for chain_matmul_square
+        matrix_stack = matrix_stack.transpose(0,1)
         #put the output node on the nodes list
-        matrix_stack = matrix_stack.reshape(input_len, batch_size, bond_dim,bond_dim)
         if self.output_dim > 0:
 
             if self.output_node_position == 'center':
                 left, right = matrix_stack.split(math.ceil(input_len/2),dim=0)
                 left = chain_matmul_square(left)
                 right = chain_matmul_square(right)
-                prod = torch.einsum('i,ijk,klm->jlm',self.alpha,left,self.output_core)
-                prod = torch.einsum('jlm,mjo,o->jl')
+                prod = torch.einsum('j,ijk,klm->ilm',self.alpha,left,self.output_core)
+                prod = torch.einsum('ijk,k->ij',prod,self.omega)
                 return prod
             elif self.output_node_position == 'end':
                 prod = chain_matmul_square(matrix_stack)
@@ -336,9 +340,3 @@ class MultiUMPS(nn.Module):
             net.to(dtype)
         
         return self
-
-if __name__=='__main__':
-    from tensornet.regressor import _collate_with_padding
-    from tensornet import dataset
-    
-     
