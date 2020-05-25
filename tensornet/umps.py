@@ -1,5 +1,4 @@
-import os
-import torch
+import os, math, torch
 from torch import nn
 import torch.nn.functional as F
 
@@ -10,7 +9,7 @@ import pytorch_lightning as pl
 from typing import List
 from ivbase.nn.base import FCLayer
 
-from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
+from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor, chain_matmul_square
 from tensornet.basemodels import SimpleFeedForwardNN
 
 
@@ -139,7 +138,8 @@ class UMPS(nn.Module):
 
         # self.tensor_core.data = self.tensor_core / tensor_norm(self.tensor_core)
 
-        output = [self._forward(inputs[ii:ii+factor]) for ii in range(0, inputs.shape[0], factor)]
+        #output = [self._forward(inputs[ii:ii+factor]) for ii in range(0, inputs.shape[0], factor)]
+        output = [self._altforward(inputs[ii:ii+factor]) for ii in range(0, inputs.shape[0], factor)]
         output = torch.cat(output, dim=0)
 
         return output
@@ -147,19 +147,7 @@ class UMPS(nn.Module):
 
     def _forward(self, inputs: torch.Tensor):
 
-        #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
-        #We need the FC nn to preserve this.
-        if self.input_nn_depth > 0:
-            nned_inputs = inputs[:,:,1:]
-            nned_inputs = self.input_nn(nned_inputs)
-
-            d1,d2,d3 = nned_inputs.shape
-            new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
-            new_inputs[:,:,0] = inputs[:,:,0]
-            new_inputs[:,:,1:] = nned_inputs
-            inputs = new_inputs
-            # inputs = F.layer_norm(inputs, inputs.shape[-1:])
-            inputs = F.softmax(inputs*self.softmax_temperature, dim=-1)
+        inputs = self.apply_nn(inputs)
         
         #slice the inputs tensor in the input_len dimension
         input_len = inputs.size(1)
@@ -195,11 +183,77 @@ class UMPS(nn.Module):
 
         return output
 
+    def apply_nn(self, inputs: torch.Tensor):
+        #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
+        #We need the FC nn to preserve this.
+        if self.input_nn_depth > 0:
+            nned_inputs = inputs[:,:,1:]
+            nned_inputs = self.input_nn(nned_inputs)
+
+            d1,d2,d3 = nned_inputs.shape
+            new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
+            new_inputs[:,:,0] = inputs[:,:,0]
+            new_inputs[:,:,1:] = nned_inputs
+            inputs = new_inputs
+            # inputs = F.layer_norm(inputs, inputs.shape[-1:])
+            inputs = F.softmax(inputs*self.softmax_temperature, dim=-1)
+        return inputs
+
+    def _altforward(self, inputs: torch.Tensor):
+        '''Each inputs x_i are contracted with a tensor A core first resulting in the matrix A_i.
+        The matrix A_i is then normalised to prevent exponential growth of the norm of the
+        intermediate states of the MPS. 
+        Args:
+            inputs:     A torch tensor of dimensions (batch_dim, input_len, feature_dim)
+        
+        Returns:        A torch tensor of dimensions (batch_dim, output_dim)
+        '''
+        inputs = self.apply_nn(inputs)
+        batch_size, input_len, feature_dim  = inputs.shape
+        core = self.tensor_core #has dimension (bond_dim, feature_dim, bond_dim)
+        bond_dim = self.bond_dim
+    
+
+        #The contraction of inputs and core along the feature_dim dimension is computed. 
+        #The result has dimension (batch_dim,input_len,bond_dim,bond_dim)
+        matrix_stack = torch.einsum('ijk,lkm->ijlm',inputs, core) 
+
+        #If input_len is large, matrix product states run the risk of overflowing when
+        #the result of the contraction is computed. We normalise the matrices
+        #to stabilize the computations.
+        #We compute the norm of the matrices in the (bond_dim,bond_dim) indices
+        matrix_norms = torch.zeros(batch_size, input_len, 1,1)
+        matrix_norms[:,:,0,0] = torch.norm(matrix_stack,dim=(2,3))/bond_dim
+        #and divide the matrix_stack by their matrix_norms
+        matrix_norms = matrix_norms.expand(batch_size,input_len,bond_dim,bond_dim)
+        matrix_stack = matrix_stack/matrix_norms
+        
+        #put the output node on the nodes list
+        matrix_stack = matrix_stack.reshape(input_len, batch_size, bond_dim,bond_dim)
+        if self.output_dim > 0:
+
+            if self.output_node_position == 'center':
+                left, right = matrix_stack.split(math.ceil(input_len/2),dim=0)
+                left = chain_matmul_square(left)
+                right = chain_matmul_square(right)
+                prod = torch.einsum('i,ijk,klm->jlm',self.alpha,left,self.output_core)
+                prod = torch.einsum('jlm,mjo,o->jl')
+                return prod
+            elif self.output_node_position == 'end':
+                prod = chain_matmul_square(matrix_stack)
+                prod = torch.einsum('j,ijk,kl->il', self.alpha, prod, self.output_core)
+                return prod
+                
+        elif self.output_dim == 0:
+            prod = chain_matmul_square(matrix_stack)
+            prod = torch.einsum('i,ijk,k->j', self.alpha, prod, self.omega)
+            return prod
+
+
     def to(self, dtype):
         super().to(dtype)
         self.dtype = dtype
         return self
-
 
 
 class MultiUMPS(nn.Module):

@@ -40,8 +40,8 @@ if __name__ == "__main__":
 
     profiler = pl.profiler.AdvancedProfiler()
     trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=20, profiler=profiler)
-    checkpoint_callback = ModelCheckpoint(filepath='~/code/models/{epoch}-{val_loss:.2f}-{batch_size:.2f}',
-            monitor='accuracy', save_top_k=5)
+    #checkpoint_callback = ModelCheckpoint(filepath='/models/{epoch}-{val_loss:.2f}-{batch_size:.2f}',
+    #        monitor='accuracy', save_top_k=5)
     trainer.fit(regressor)
 
 

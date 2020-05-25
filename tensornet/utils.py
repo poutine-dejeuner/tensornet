@@ -157,6 +157,37 @@ def batch_node(num_inputs, batch_dim, device, dtype=torch.float):
     
     return edge_list, copy_node_list
 
+def chain_matmul_square(As):
+    """
+    Matrix multiplication of chains of square matrices
+​
+    Parameters
+    --------------
+        As: Tensor of shape (L, ..., N, N)
+​
+            The list of tensors to multiply. It supports batches.
+            
+            - L: Lenght of the chain of matrices for the matmul
+            - N: Size of the matrix (must be a square matrix) 
+​
+    Returns
+    ------------
+        As_matmul: Tensor of shape (..., N, N)
+            The tensor resulting of the chain multiplication
+​
+    """
+    As_matmul = As
+    while As_matmul.shape[0] > 1:
+        if As_matmul.shape[0] % 2:
+            A_last = As_matmul[-1:]
+        else:
+            A_last = None
+        
+        As_matmul = torch.matmul(As_matmul[0:-1:2], As_matmul[1::2])
+        if A_last is not None:
+            As_matmul = torch.cat([As_matmul, A_last], dim=0)
+    
+    return As_matmul.squeeze(0)
 
 def tensor_norm(tensor):
     
