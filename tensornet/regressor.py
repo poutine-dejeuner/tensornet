@@ -235,7 +235,7 @@ class ClassifyRegressor(Regressor):
 
         loss = loss/self.batch_size
         
-        tensorboard_logs = {f'MSE_loss': loss}
+        tensorboard_logs = {f'Cross_entropy': loss}
 
         # If there is a scaler, reverse the scaling and compute the MAE
         if hasattr(self.dataset,'scaler'):
@@ -262,7 +262,7 @@ class ClassifyRegressor(Regressor):
         accuracy = accuracy/self.batch_size
         accuracy = torch.tensor(accuracy)
         
-        tensorboard_logs = {f'MSE_loss': loss, f'accuracy': accuracy}
+        tensorboard_logs = {f'Cross_entropy': loss, f'accuracy': accuracy}
 
         # If there is a scaler, reverse the scaling and compute the MAE      
         if hasattr(self.dataset,'scaler'):
