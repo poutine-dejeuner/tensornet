@@ -23,11 +23,12 @@ class MNIST(datasets.MNIST):
         transform = transforms.ToTensor()
         image = transform(image).squeeze().unsqueeze(2)
         image = image.type(self.dtype)
+        zeros = torch.zeros_like(image)
         cos = torch.cos(image*math.pi/2)
         sin = torch.sin(image*math.pi/2 )
-        image = torch.stack((cos,sin),2).squeeze()
+        image = torch.stack((zeros,cos,sin),2).squeeze()
         shape = image.shape
-        image = image.reshape(shape[0]*shape[1],2)
+        image = image.reshape(shape[0]*shape[1],3)
         image = image.unsqueeze(0)
 
         return image, onehot
@@ -43,3 +44,4 @@ if __name__=='__main__':
     data = MNIST(dtype = torch.float, root  = './mnist',download=True)
     item=data.__getitem__(0)
     print(item)
+    print('sick code bro')

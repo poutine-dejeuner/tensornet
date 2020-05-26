@@ -72,11 +72,12 @@ class UMPS(nn.Module):
         tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim 
         tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
                                                                                     opt=tensor_init)
+        torch.nn.Parameter(tensor_core)
         eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float)
         batch_core = torch.zeros(bond_dim, tensor_num_feats + 1, bond_dim, dtype=torch.float)
         batch_core[:, 0, :] = eye
         batch_core[:, 1:, :] = tensor_core[:, :, :]
-        self.tensor_core = torch.nn.Parameter(batch_core)
+        self.tensor_core = batch_core
 
         # Initializing other tensors for the tensor network
         self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
@@ -127,6 +128,8 @@ class UMPS(nn.Module):
         Takes a batch input tensor, computes the number of inputs, creates a UMPS
         of length length equal to the number of inputs, connects the input nodes
         to the corresponding tensor nodes and returns the resulting contracted tensor.
+        feature_dim is equal to the embedding dimension of the data + 1. The added dimension
+        is necessary for the bach processing of data.
 
         Args:
             inputs:     A torch tensor of dimensions (batch_dim, input_len, feature_dim)

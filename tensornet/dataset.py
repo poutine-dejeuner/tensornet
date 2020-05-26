@@ -152,3 +152,14 @@ class CosineDataset(Dataset):
         if self.scaler is not None:
             self.scaler.to(dtype)
         return self
+
+if __name__=='__main__':
+    import tensornet
+    datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    dataset = MolDataset(datapath, smiles_col='smiles')
+    onehot,values = dataset.__getitem__([0])
+    print(onehot)
+    print(values)
+
+    print(dataset.seq_transfo(['#']))
+    print(dataset.seq_transfo(['BI']))
