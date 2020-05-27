@@ -3,7 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 
 import numpy as np
-import tensornetwork as tn
 import pytorch_lightning as pl
 
 from typing import List
@@ -13,11 +12,10 @@ from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tens
 from tensornet.basemodels import SimpleFeedForwardNN
 
 
-tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
 
 
-class UMPS(nn.Module):
+class UMPS(pl.LightningModule):
 
     def __init__(self, 
                 bond_dim:int,
@@ -28,7 +26,8 @@ class UMPS(nn.Module):
                 input_nn_kwargs=None,
                 dtype=torch.float,
                 batch_max_parallel=4,
-                output_node_position='center'):
+                output_node_position='center',
+                device='cuda:0'):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -69,16 +68,16 @@ class UMPS(nn.Module):
         #constructed and concatenated to tensor_core to construct the batch_core.
         #The point of batch core is that when contracted with a padding vector as
         #input the resulting matrix is the identity.
+        #It is also important that the identity matrix that is stacked on top of the tensor core
+        #is not treated as a learnable parameter.
+        
         tensor_num_feats = input_nn_out_size if input_nn_depth > 0 else self.feature_dim 
-        tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
+        self.tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
                                                                                     opt=tensor_init)
-        torch.nn.Parameter(tensor_core)
-        eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float)
-        batch_core = torch.zeros(bond_dim, tensor_num_feats + 1, bond_dim, dtype=torch.float)
-        batch_core[:, 0, :] = eye
-        batch_core[:, 1:, :] = tensor_core[:, :, :]
-        self.tensor_core = batch_core
-
+        self.tensor_core = torch.nn.Parameter(self.tensor_core)
+        eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float, device=device)
+        self.eye = eye.unsqueeze(1)
+        
         # Initializing other tensors for the tensor network
         self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
         self.alpha = torch.nn.Parameter(self.alpha)
@@ -146,45 +145,6 @@ class UMPS(nn.Module):
         output = torch.cat(output, dim=0)
 
         return output
-        
-
-    def _forward(self, inputs: torch.Tensor):
-
-        inputs = self.apply_nn(inputs)
-        
-        #slice the inputs tensor in the input_len dimension
-        input_len = inputs.size(1)
-        input_list = [inputs.select(1,i) for i in range(input_len)]
-        input_list = [tn.Node(vect) for vect in input_list]
-        input_node_list = [tn.Node(self.tensor_core) for i in range(input_len)]
-
-        if self.output_dim > 0:
-            output_node = tn.Node(self.output_core, name = 'output') 
-
-            if self.output_node_position == 'center':
-                #add output node at the center of the input nodes
-                node_list = input_node_list.copy()
-                node_list.insert(input_len//2, output_node)
-            elif self.output_node_position == 'end':
-                node_list = input_node_list + [output_node]
-        elif self.output_dim == 0:
-            node_list = input_node_list
-
-        #connect tensor cores
-        for i in range(len(node_list)-1):
-            node_list[i][2]^node_list[i+1][0]
-
-        #connect the alpha and omega nodes to the first and last nodes
-        tn.Node(self.alpha, name = 'alpha')[0]^node_list[0][0]
-
-        if self.output_node_position != 'end':
-            tn.Node(self.omega, name = 'omega')[0]^node_list[len(node_list)-1][2]
-
-        output = evaluate_input(input_node_list, input_list, dtype=self.dtype).tensor
-
-        output = self.output_nn(output)
-
-        return output
 
     def apply_nn(self, inputs: torch.Tensor):
         #The slice inputs[:,:,0] has 0 for normal inputs and 1 for padding vectors.
@@ -213,13 +173,13 @@ class UMPS(nn.Module):
         '''
         inputs = self.apply_nn(inputs)
         batch_size, input_len, feature_dim  = inputs.shape
-        core = self.tensor_core #has dimension (bond_dim, feature_dim, bond_dim)
+        batch_core = torch.cat((self.eye, self.tensor_core), 1)
         bond_dim = self.bond_dim
     
 
         #The contraction of inputs and core along the feature_dim dimension is computed. 
         #The result has dimension (batch_dim,input_len,bond_dim,bond_dim)
-        matrix_stack = torch.einsum('ijk,lkm->ijlm',inputs, core) 
+        matrix_stack = torch.einsum('ijk,lkm->ijlm',inputs, batch_core) 
 
         #If input_len is large, matrix product states run the risk of overflowing when
         #the result of the contraction is computed. We normalise the matrices

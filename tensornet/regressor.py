@@ -1,7 +1,6 @@
 import os, math
 import torch
 import numpy as np
-import tensornetwork as tn
 import pytorch_lightning as pl
 
 import torch.nn.functional as F
@@ -13,7 +12,6 @@ from ivbase.nn.base import FCLayer
 from tensornet.utils import evaluate_input, batch_node, tensor_norm, create_tensor
 from tensornet.umps import UMPS, MultiUMPS
 
-tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.DoubleTensor)
 
 
@@ -132,7 +130,7 @@ class Regressor(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=1)
+        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
         #torch.optim.RMSprop(self.parameters(), lr=0.01, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0, centered=False)
         #torch.optim.SparseAdam(self.parameters(), lr=0.001, betas=(0.9, 0.999), eps=1e-08)
         #torch.optim.SGD(self.parameters(), lr=self.lr, momentum=0, dampening=0, weight_decay=0, nesterov=False)
