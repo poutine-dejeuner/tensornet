@@ -27,7 +27,7 @@ class UMPS(pl.LightningModule):
                 dtype=torch.float,
                 batch_max_parallel=4,
                 output_node_position='center',
-                device='cuda:0'):
+                device='cpu'):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -57,6 +57,8 @@ class UMPS(pl.LightningModule):
         assert(output_node_position in {'center', 'end'})
         self.output_node_position = output_node_position
 
+        #one dimension in the feature vectors is used for padding, the actual
+        #feature dimension is one less
         self.feature_dim = dataset[0][0].shape[-1] - 1
         
         try:
@@ -172,19 +174,28 @@ class UMPS(pl.LightningModule):
         Returns:        A torch tensor of dimensions (batch_dim, output_dim)
         '''
         inputs = self.apply_nn(inputs)
-        batch_size, input_len, feature_dim  = inputs.shape
         batch_core = torch.cat((self.eye, self.tensor_core), 1)
-        bond_dim = self.bond_dim
     
-
         #The contraction of inputs and core along the feature_dim dimension is computed. 
         #The result has dimension (batch_dim,input_len,bond_dim,bond_dim)
         matrix_stack = torch.einsum('ijk,lkm->ijlm',inputs, batch_core) 
-
+        
         #If input_len is large, matrix product states run the risk of overflowing when
         #the result of the contraction is computed. We normalise the matrices
         #to stabilize the computations.
         #We compute the norm of the matrices in the (bond_dim,bond_dim) indices
+        matrix_stack = self.normalise_matrices(matrix_stack)
+        
+        #the order of the (batch_size, input_len) dimensions are inversed for use as 
+        #input for chain_matmul_square. Matrix_stack then has dimensions 
+        #(input_len, batch_dim, bond_dim, bond_dim)
+        matrix_stack = matrix_stack.transpose(0,1)
+
+        #The output node is put in the nodes list and everything is contracted
+        return self.contraction(matrix_stack)
+
+    def normalise_matrices(self, matrix_stack):
+        input_len, batch_size, bond_dim  = matrix_stack.shape[0:3]
         device = matrix_stack.device
         matrix_norms = torch.zeros(batch_size, input_len, 1,1).to(device)
         matrix_norms[:,:,0,0] = torch.norm(matrix_stack,p='nuc',dim=(2,3))/torch.Tensor([bond_dim]).to(device)
@@ -192,16 +203,17 @@ class UMPS(pl.LightningModule):
         #and divide the matrix_stack by their matrix_norms
         matrix_norms = matrix_norms.expand(batch_size,input_len,bond_dim,bond_dim)
         matrix_stack = matrix_stack/matrix_norms
-        
-        #the order of the (batch_size, input_len) dimensions are inversed for use as 
-        #input for chain_matmul_square
-        matrix_stack = matrix_stack.transpose(0,1)
-        #put the output node on the nodes list
+        return matrix_stack
+
+    def contraction(self, matrix_stack):
+
         if self.output_dim > 0:
 
             if self.output_node_position == 'center':
                 left, right = matrix_stack.split(math.ceil(input_len/2),dim=0)
+                #left has dimensions (batch_dim, bond_dim, bond_dim)
                 left = chain_matmul_square(left)
+                #right has dimensions (batch_dim, bond_dim, bond_dim)
                 right = chain_matmul_square(right)
                 prod = torch.einsum('j,ijk,klm->ilm',self.alpha,left,self.output_core)
                 prod = torch.einsum('ijk,k->ij',prod,self.omega)
@@ -215,7 +227,6 @@ class UMPS(pl.LightningModule):
             prod = chain_matmul_square(matrix_stack)
             prod = torch.einsum('i,ijk,k->j', self.alpha, prod, self.omega)
             return prod
-
 
     def to(self, dtype):
         super().to(dtype)

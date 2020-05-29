@@ -10,5 +10,8 @@ class Test_batch_node(ut.TestCase):
 
 class Test_tensor_norm(ut.TestCase):
 
+class Test_chain_matmul_square(ut.TestCase):
+    def
+
 if __name__ == '__main__':
     ut.main()
