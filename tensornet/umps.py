@@ -49,7 +49,6 @@ class UMPS(pl.LightningModule):
         self.input_nn_depth = input_nn_depth
         self.input_nn_out_size = input_nn_out_size
         self.input_nn_kwargs = input_nn_kwargs
-        self.dtype = dtype
         self.batch_max_parallel = batch_max_parallel
         self.output_nn_size = 32
         self.output_nn_depth = 0
@@ -230,7 +229,6 @@ class UMPS(pl.LightningModule):
 
     def to(self, dtype):
         super().to(dtype)
-        self.dtype = dtype
         return self
 
 

@@ -49,7 +49,6 @@ class Regressor(pl.LightningModule):
         self.validation_split = validation_split
         self.random_seed = random_seed
         self.num_workers = num_workers        
-        self.dtype = dtype
 
         self.to(dtype)
         
