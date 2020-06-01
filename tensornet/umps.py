@@ -195,7 +195,7 @@ class UMPS(pl.LightningModule):
         return self.contraction(matrix_stack)
 
     def normalise_matrices(self, matrix_stack):
-        input_len, batch_size, bond_dim  = matrix_stack.shape[0:3]
+        batch_size, input_len, bond_dim  = matrix_stack.shape[0:3]
         device = matrix_stack.device
         matrix_norms = torch.zeros(batch_size, input_len, 1,1).to(device)
         matrix_norms[:,:,0,0] = torch.norm(matrix_stack,p='nuc',dim=(2,3))/torch.Tensor([bond_dim]).to(device)
@@ -206,7 +206,7 @@ class UMPS(pl.LightningModule):
         return matrix_stack
 
     def contraction(self, matrix_stack):
-
+        input_len = matrix_stack.shape[0]
         if self.output_dim > 0:
 
             if self.output_node_position == 'center':
