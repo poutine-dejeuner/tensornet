@@ -9,6 +9,17 @@ from tensornetwork.backends.pytorch.pytorch_backend import PyTorchBackend
 
 Tensor = Any
 
+def tensor_tree_node_init(shape, std=1e-8):
+    diag = torch.zeros(shape[1:])
+    #set ones on diagonal
+    idx = list(range(shape[1]))
+    idx = [idx for j in range(len(shape)-1)]
+    diag[idx] = 1
+    diag = diag.expand(shape)
+    noise = math.sqrt(std)*torch.randn(shape)
+    tensor = diag + noise
+    return tensor
+
 def create_tensor(shape, opt='eye', dtype=torch.float, **kwargs):
     if opt == 'eye':
         tensor = random_tensor(shape, **kwargs)

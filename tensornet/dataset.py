@@ -2,9 +2,43 @@ import torch, os
 import pandas as pd
 import numpy as np
 from torch.utils.data import Dataset
-from ivbase.transformers.features.molecules import SequenceTransformer
+from ivbase.transformers.features.molecules import SequenceTransformer, AdjGraphTransformer
 
 from tensornet.arg_checker import check_arg_iterator
+
+class MolGraphDataset(Dataset):
+
+    def __init__(self, csvpath, scaler=None, smiles_col=None, dtype=torch.float, column=0):
+
+        #self.alphabet = ['H', 'B', 'C', 'N', 'O', 'F', 'P', 'S', 'Cl',  'Br', 'I']
+        self.path=csvpath
+        self.dtype = dtype
+        df = pd.read_csv(self.path)
+        cols = df.columns
+
+        # Get the smiles
+        if smiles_col is None:
+            smiles_col = [col for col in cols if (isinstance(col, str) and ('smile' in col.lower()))]
+        smiles_col = check_arg_iterator(smiles_col, enforce_type=list)
+        if len(smiles_col) != 1:
+            raise ValueError(f'There must be a single SMILES column. Provided: {smiles_col}')
+        self.smiles = df[smiles_col].values.flatten()
+
+        self.values = df.iloc[:, 2:].values[column]
+
+    def __len__(self):
+        return len(self.values)
+
+    def __getitem__(self, idx):
+        idx = check_arg_iterator(idx, enforce_type=list)
+        smile = self.smiles[idx]
+        value = self.values[idx]
+
+        adjtransfo = AdjGraphTransformer(explicit_H=True)
+
+        adjacency, features = adjtransfo(smile)[0][0]
+
+        return adjacency, features, value
 
 
 class MolDataset(Dataset):
@@ -156,6 +190,7 @@ class CosineDataset(Dataset):
 if __name__=='__main__':
     import tensornet
     datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    '''
     dataset = MolDataset(datapath, smiles_col='smiles')
     onehot,values = dataset.__getitem__([0])
     print(onehot)
@@ -163,3 +198,11 @@ if __name__=='__main__':
 
     print(dataset.seq_transfo(['#']))
     print(dataset.seq_transfo(['BI']))
+    '''
+
+    dataset = MolGraphDataset(datapath, smiles_col='smiles')
+    onehot, features, values = dataset.__getitem__([8])
+    print(dataset.__len__())
+    print(onehot)
+    print(features)
+    print(values)
