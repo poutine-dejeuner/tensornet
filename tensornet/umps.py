@@ -26,8 +26,7 @@ class UMPS(pl.LightningModule):
                 input_nn_kwargs=None,
                 dtype=torch.float,
                 batch_max_parallel=4,
-                output_node_position='center',
-                device='cpu'):
+                output_node_position='center'):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -76,8 +75,9 @@ class UMPS(pl.LightningModule):
         self.tensor_core = create_tensor((bond_dim, tensor_num_feats, bond_dim), requires_grad=True, 
                                                                                     opt=tensor_init)
         self.tensor_core = torch.nn.Parameter(self.tensor_core)
-        eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float, device=device)
-        self.eye = eye.unsqueeze(1)
+        eye = torch.eye(bond_dim,bond_dim, requires_grad = False, dtype=torch.float)
+        eye = eye.unsqueeze(1)
+        self.register_buffer('eye',eye)
         
         # Initializing other tensors for the tensor network
         self.alpha = create_tensor((bond_dim), requires_grad=True, opt='norm')
@@ -155,7 +155,7 @@ class UMPS(pl.LightningModule):
             nned_inputs = self.input_nn(nned_inputs)
 
             d1,d2,d3 = nned_inputs.shape
-            new_inputs = torch.zeros(d1,d2,d3+1, dtype=self.dtype).type_as(inputs)
+            new_inputs = torch.zeros((d1,d2,d3+1), dtype=self.dtype.dtype).type_as(inputs)
             new_inputs[:,:,0] = inputs[:,:,0]
             new_inputs[:,:,1:] = nned_inputs
             inputs = new_inputs
@@ -194,10 +194,17 @@ class UMPS(pl.LightningModule):
         return self.contraction(matrix_stack)
 
     def normalise_matrices(self, matrix_stack):
+        M = matrix_stack
         batch_size, input_len, bond_dim  = matrix_stack.shape[0:3]
         device = matrix_stack.device
+        
+        try:
+            u, s, v = torch.svd(M)
+        except:                     # torch.svd may have convergence issues for GPU and CPU.
+            u, s, v = torch.svd(M + 1e-4*M.mean()*torch.rand_like(M))
         matrix_norms = torch.zeros(batch_size, input_len, 1,1).to(device)
-        matrix_norms[:,:,0,0] = torch.norm(matrix_stack,p='nuc',dim=(2,3))/torch.Tensor([bond_dim]).to(device)
+        matrix_norms[:,:,0,0] = torch.sum(s,dim=-1)/torch.Tensor([bond_dim]).to(device)
+        
 
         #and divide the matrix_stack by their matrix_norms
         matrix_norms = matrix_norms.expand(batch_size,input_len,bond_dim,bond_dim)

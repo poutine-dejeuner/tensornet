@@ -1,6 +1,6 @@
 import os
 import torch
-import pytorch_lightning
+import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from ivbase.transformers.scaler import StandardScaler
 
@@ -27,8 +27,8 @@ if __name__ == "__main__":
 
     scaler = TorchScalerWrapper(StandardScaler())
 
-    datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
-    dataset = MolDataset(datapath, scaler=scaler, smiles_col='smiles')
+    datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_mini.csv')
+    dataset = MolDataset(datapath, scaler=scaler, smiles_col='smiles', num_features=1)
 
     # datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/cosine_dataset_len-30-30_num-freq-3.csv')
     # dataset = CosineDataset(datapath, scaler=scaler, features_prefix='feat_', labels_prefix=['amplitude_', 'wavelength_'])
@@ -48,9 +48,10 @@ if __name__ == "__main__":
     num_workers = os.cpu_count()
     regressor = Regressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
                 lr=1e-3, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
-                num_workers=num_workers, dtype=DTYPE)
+                num_workers=num_workers, dtype=DTYPE, weight_decay=1)
 
-    trainer = Trainer(gpus=gpus, min_epochs=100, max_epochs=100)
+    profiler = pl.profiler.AdvancedProfiler()
+    trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=6, profiler=profiler)
     trainer.fit(regressor)
 
 

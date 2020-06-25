@@ -97,6 +97,7 @@ class Regressor(pl.LightningModule):
                 random_seed: int=42,
                 num_workers: int=1,
                 dtype = torch.float,
+                weight_decay = 0
                 ):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
@@ -118,7 +119,8 @@ class Regressor(pl.LightningModule):
         self.batch_size = batch_size
         self.validation_split = validation_split
         self.random_seed = random_seed
-        self.num_workers = num_workers        
+        self.num_workers = num_workers   
+        self.weight_decay = weight_decay     
 
         self.to(dtype)
 
@@ -204,7 +206,7 @@ class Regressor(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimiser = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
+        optimiser = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         #optimiser = torch.optim.RMSprop(self.parameters(), lr=0.01, alpha=0.99, eps=1e-08, 
         #weight_decay=0, momentum=0, centered=False)
         #optimiser = torch.optim.SparseAdam(self.parameters(), lr=0.001, betas=(0.9, 0.999), 

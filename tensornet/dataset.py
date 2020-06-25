@@ -56,10 +56,11 @@ class MolDataset(Dataset):
         values: tensor of dimension (batch_size, 19)
     """
 
-    def __init__(self, csvpath, scaler=None, smiles_col=None, dtype=torch.float):
+    def __init__(self, csvpath, scaler=None, smiles_col=None, dtype=torch.float, num_features=-1):
 
         self.path=csvpath
         self.dtype = dtype
+        self.num_features = num_features
         df = pd.read_csv(self.path)
         cols = df.columns
 
@@ -72,9 +73,11 @@ class MolDataset(Dataset):
         self.smiles = df[smiles_col].values.flatten()
 
         # Get the values
-        #columns = [0,1]
-        #self.values = df.iloc[:, 2:].values[:,columns]
-        self.values = df.iloc[:, 2:].values
+        if self.num_features != -1:
+            columns = list(range(self.num_features))
+            self.values = df.iloc[:, 2:].values[:,columns]
+        else:
+            self.values = df.iloc[:, 2:].values
         
         self.vocabulary = ['#', '%', ')', '(', '+', '*', '-', '/', '.',
                            '1', '0', '3', '2', '5', '4', '7', '6', '9', '8', 
@@ -189,12 +192,17 @@ class CosineDataset(Dataset):
 
 if __name__=='__main__':
     import tensornet
+    from ivbase.transformers.scaler import StandardScaler
+    from tensornet.utils import TorchScalerWrapper
+
+    scaler = TorchScalerWrapper(StandardScaler())
     datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
     '''
     dataset = MolDataset(datapath, smiles_col='smiles')
     onehot,values = dataset.__getitem__([0])
-    print(onehot)
-    print(values)
+    print('onehot='+str(onehot))
+    print('values='+str(values))
+    print()
 
     print(dataset.seq_transfo(['#']))
     print(dataset.seq_transfo(['BI']))
