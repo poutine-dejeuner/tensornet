@@ -80,7 +80,7 @@ if __name__ == '__main__':
 
     datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
     dataset = MolGraphDataset(datapath, scaler=None, smiles_col='smiles')
-    networker = MoleculeTensorNetwork(
+    moltennet = MoleculeTensorNetwork(
         dataset=dataset,
         max_degree=4,
         bond_dim=100
@@ -88,5 +88,5 @@ if __name__ == '__main__':
     print(dataset.__len__())
     for i in range(4,dataset.__len__()):
         adjacency, features, value = dataset.__getitem__([i])
-        result = networker(adjacency,features)
+        result = moltennet(adjacency,features)
         print(result.tensor)
