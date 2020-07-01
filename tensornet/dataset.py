@@ -24,7 +24,7 @@ class MolGraphDataset(Dataset):
             raise ValueError(f'There must be a single SMILES column. Provided: {smiles_col}')
         self.smiles = df[smiles_col].values.flatten()
 
-        self.values = df.iloc[:, 2:].values[column]
+        self.values = df.iloc[:, 2:].values[:,column]
 
     def __len__(self):
         return len(self.values)
