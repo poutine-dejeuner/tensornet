@@ -10,14 +10,28 @@ from tensornetwork.backends.pytorch.pytorch_backend import PyTorchBackend
 Tensor = Any
 
 def tensor_tree_node_init(shape, std=1e-8):
-    diag = torch.zeros(shape[1:])
-    #set ones on diagonal
-    idx = list(range(shape[1]))
-    idx = [idx for j in range(len(shape)-1)]
-    diag[idx] = 1
-    diag = diag.expand(shape)
-    noise = math.sqrt(std)*torch.randn(shape)
-    tensor = diag + noise
+    """
+    This returns a tensor in the given shape. It is constructed from tensor with ones 
+    on its diagonal and expanded in the first dimension. Some noise is added. The noise 
+    is sampled from a normal distribution with mean 0 and variance std.
+    
+    TODO: Try initialising tensors by creating a bond_dim x bond_dim matrix and expanding
+    in remaining dimensions.
+    """
+    if len(shape)>1:
+        diag = torch.zeros(shape[1:])
+        #set ones on diagonal
+        bond_dim = shape[1]
+        idx = list(range(bond_dim))
+        idx = [idx for j in range(len(shape)-1)]
+        diag[idx] = 1
+        diag = diag.expand(shape)
+        noise = math.sqrt(std)*torch.randn(shape)
+        tensor = diag + noise
+    elif len(shape)==1:
+        noise = math.sqrt(std)*torch.randn(shape)
+        tensor = torch.zeros(shape) + noise
+
     return tensor
 
 def create_tensor(shape, opt='eye', dtype=torch.float, **kwargs):

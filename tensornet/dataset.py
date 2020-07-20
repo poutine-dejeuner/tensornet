@@ -32,13 +32,13 @@ class MolGraphDataset(Dataset):
     def __getitem__(self, idx):
         idx = check_arg_iterator(idx, enforce_type=list)
         smile = self.smiles[idx]
-        value = self.values[idx]
+        values = self.values[idx]
 
         adjtransfo = AdjGraphTransformer(explicit_H=True)
 
         adjacency, features = adjtransfo(smile)[0][0]
 
-        return adjacency, features, value
+        return {'adjacency':adjacency, 'features':features, 'values':values}
 
 
 class MolDataset(Dataset):

@@ -15,76 +15,6 @@ from tensornet.umps import UMPS, MultiUMPS
 torch.set_default_tensor_type(torch.DoubleTensor)
 
 
-class MolGraphRegressor(Regressor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def _get_loss_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1)      
-            loss += self.loss_fun(scores,numbers,reduction='sum')             
-
-        loss = loss/self.batch_size
-        
-        tensorboard_logs = {f'Cross_entropy': loss}
-
-        # If there is a scaler, reverse the scaling and compute the MAE
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
-                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
-
-        return {'loss': loss, 'log': tensorboard_logs}
-
-    def _get_val_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = accuracy = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1) 
-            loss += self.loss_fun(scores,numbers,reduction='sum')
-            with torch.no_grad():
-                accuracy += torch.sum(preds == numbers).item()                
-
-        loss = loss/self.batch_size
-        accuracy = accuracy/self.batch_size
-        accuracy = torch.tensor(accuracy)
-        
-        tensorboard_logs = {f'Cross_entropy': loss, f'accuracy': accuracy}
-
-        # If there is a scaler, reverse the scaling and compute the MAE      
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
-                scaler = self.dataset.scaler
-                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
-
-        return {'loss': loss, 'log': tensorboard_logs}
-
-    def train_dataloader(self):
-        num_workers = self.num_workers 
-        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
-                num_workers=num_workers, sampler = self.train_sampler,
-                 collate_fn=None, drop_last=True)
-        return train_loader
-
-    def training_step(self, batch, batch_idx):
-        return self._get_loss_logs(batch, batch_idx, step_name='train')
-
- 
-    def validation_step(self, batch, batch_idx):
-        return self._get_val_logs(batch, batch_idx, step_name='val')
-
-
 class Regressor(pl.LightningModule):
 
     def __init__(self, 
@@ -123,11 +53,6 @@ class Regressor(pl.LightningModule):
         self.weight_decay = weight_decay     
 
         self.to(dtype)
-
-        def forward(self, inputs: List[torch.Tensor]):
-        return self.model(inputs)
-
-
         
 
     def _collate_with_padding(self, 
@@ -213,7 +138,7 @@ class Regressor(pl.LightningModule):
         # eps=1e-08)
         #optimiser = torch.optim.SGD(self.parameters(), lr=self.lr, momentum=0, dampening=0, 
         #weight_decay=0, nesterov=False)
-        torch.optim.lr_scheduler.ExponentialLR(optimiser, gamma=.5)
+        #torch.optim.lr_scheduler.ExponentialLR(optimiser, gamma=.5)
         return optimiser
 
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
@@ -284,7 +209,89 @@ class Regressor(pl.LightningModule):
                 num_workers=num_workers, sampler = self.valid_sampler,
                  collate_fn=self._collate_with_padding, drop_last=True)
         return valid_loader
+
+class MolGraphRegressor(Regressor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def configure_optimizers(self):
+        optimiser = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
+        return optimiser
+
+    def _get_loss_logs(self, batch, batch_idx, step_name:str):
+        # Get the truth `y`, predictions and compute the MSE and MAE
+        loss = 0
+        for mini_batch in batch:
+            x, y = mini_batch
+            scores = self(x)
+            _, preds = torch.max(scores,1)
+            _, numbers = torch.max(y,1)      
+            loss += self.loss_fun(scores,numbers,reduction='sum')             
+
+        loss = loss/self.batch_size
         
+        tensorboard_logs = {f'Cross_entropy': loss}
+
+        # If there is a scaler, reverse the scaling and compute the MAE
+        if hasattr(self.dataset,'scaler'):
+            if self.dataset.scaler is not None:
+                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+
+        return {'loss': loss, 'log': tensorboard_logs}
+
+    def _get_val_logs(self, batch, batch_idx, step_name:str):
+        # Get the truth `y`, predictions and compute the MSE and MAE
+        loss = accuracy = 0
+        for mini_batch in batch:
+            x, y = mini_batch
+            scores = self(x)
+            _, preds = torch.max(scores,1)
+            _, numbers = torch.max(y,1) 
+            loss += self.loss_fun(scores,numbers,reduction='sum')
+            with torch.no_grad():
+                accuracy += torch.sum(preds == numbers).item()                
+
+        loss = loss/self.batch_size
+        accuracy = accuracy/self.batch_size
+        accuracy = torch.tensor(accuracy)
+        
+        tensorboard_logs = {f'Cross_entropy': loss, f'accuracy': accuracy}
+
+        # If there is a scaler, reverse the scaling and compute the MAE      
+        if hasattr(self.dataset,'scaler'):
+            if self.dataset.scaler is not None:
+                scaler = self.dataset.scaler
+                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
+                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+
+        return {'loss': loss, 'log': tensorboard_logs}
+
+    def train_dataloader(self):
+        num_workers = self.num_workers 
+        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
+                num_workers=num_workers, sampler = self.train_sampler,
+                 collate_fn=None, drop_last=True)
+        return train_loader
+
+    def val_dataloader(self):
+        num_workers = self.num_workers
+        valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
+                num_workers=num_workers, sampler = self.valid_sampler,
+                 collate_fn=None, drop_last=True)
+        return valid_loader
+
+    def training_step(self, batch, batch_idx):
+        return self._get_loss_logs(batch, batch_idx, step_name='train')
+
+ 
+    def validation_step(self, batch, batch_idx):
+        return self._get_val_logs(batch, batch_idx, step_name='val')
+
+
+
 class ClassifyRegressor(Regressor):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
