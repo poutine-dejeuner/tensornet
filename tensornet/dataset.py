@@ -103,7 +103,7 @@ class MolDataset(Dataset):
 
     def __getitem__(self, idx):
         idx = check_arg_iterator(idx, enforce_type=list)
-
+        idx = tuple(idx)
         values = torch.Tensor(self.values[idx])
         smiles = self.smiles[idx]
         if type(smiles) is str:

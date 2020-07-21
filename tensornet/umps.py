@@ -392,5 +392,10 @@ if __name__=='__main__':
     datapath = os.path.join(datapath, 'data/qm9_mini.csv')
     dataset = MolDataset(datapath, smiles_col='smiles', num_features=1)
     mps = MPS(dataset = dataset, bond_dim=20)
-    data = dataset.__getitem__(32)
-    mps(data)
+    mps.to(torch.float)
+    parsedsmiles, values = dataset.__getitem__(32)
+    input_tensor = torch.zeros(1,32,41)
+    input_tensor[0,:,0] = torch.ones(32)
+    input_tensor[0,:5,:] = parsedsmiles
+    input_tensor = input_tensor.to(torch.float32)
+    print(mps(input_tensor))

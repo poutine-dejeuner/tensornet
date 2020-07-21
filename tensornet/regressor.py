@@ -151,6 +151,7 @@ class Regressor(pl.LightningModule):
         loss = mae = 0
         for mini_batch in batch:
             x, y = mini_batch
+            y = y.squeeze()
             preds = self(x)            
             scaler = self.dataset.scaler
             loss += self.loss_fun(preds,y)
@@ -240,6 +241,27 @@ class Regressor2(Regressor):
         batch_collated_inputs = [(collated_tensors_x, collated_tensors_y)]
 
         return batch_collated_inputs
+
+    def validation_epoch_end(self, outputs):
+
+        # Transform the list of dict of dict, into a dict of list of dict
+        log_dict = {}
+        for out in outputs:
+            for log_key, log_val in out['log'].items():
+                if log_key not in log_dict.keys():
+                    log_dict[log_key] = []
+                log_dict[log_key].append(log_val)
+        
+        # Compute the average of all the metrics
+        tensorboard_logs = {log_key: torch.stack(log_val).mean() for log_key, log_val in log_dict.items()}
+        
+        cur_epoch = self.current_epoch + 1 if self.global_step > 0 else 0
+
+        # display the sum of the absolute value of the tensor
+        self.logger.experiment.add_image('tensor_ABS_SUM/val', 
+                    torch.sum(torch.abs(self.model.tensors), dim=(0,1)), cur_epoch, dataformats='HW')
+
+        return {'log': tensorboard_logs}
 
 class MolGraphRegressor(Regressor):
     def __init__(self, **kwargs):
