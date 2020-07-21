@@ -14,6 +14,70 @@ from tensornet.basemodels import SimpleFeedForwardNN
 
 torch.set_default_tensor_type(torch.DoubleTensor)
 
+class MPS(pl.LightningModule):
+
+    def __init__(self, 
+                bond_dim:int,
+                dataset,
+                input_len=32,
+                tensor_init='eye',
+                dtype=torch.float,
+                batch_max_parallel=4,
+                ):
+        super().__init__()
+
+        # Basic attributes
+        self.dataset = dataset
+        self.bond_dim = bond_dim
+        self.batch_max_parallel = batch_max_parallel
+        self.input_len = input_len
+
+        self.input_dim = dataset[0][0].shape[-1]
+        
+        try:
+            self.output_dim = dataset[0][1].shape[-1]
+        except Exception:
+            self.output_dim = 0
+
+        end_shape = (self.input_dim, self.bond_dim)
+        self.left_end_tensor = create_tensor(end_shape, opt = 'eye')
+        self.left_end_tensor = torch.nn.Parameter(self.left_end_tensor)
+        self.right_end_tensor = create_tensor(end_shape, opt = 'eye')
+        self.right_end_tensor = torch.nn.Parameter(self.right_end_tensor)
+
+        shape = (self.input_dim, self.bond_dim, self.bond_dim)
+        tensors = [ create_tensor(shape) for i in range(self.input_len - 2) ]
+        tensors = torch.stack(tensors)
+        self.tensors = torch.nn.Parameter(tensors)
+
+        self.to(dtype)
+
+    def forward(self, inputs: torch.Tensor):
+        inputs_without_the_ends = inputs[:,1:-1,:]
+
+        #inputs_withoud_the_ends has dimensions (batch_dim, input_len, input_dim) and self.tensors
+        #has dimensions (input_len - 2, input_dim, bond_dim, bond_dim). The first and last slices
+        #in the input_len dimensions are removed to fit thee input_len - 2 dimension of self.tensors.
+        #The 2 tensors are then contracted along the input_len - 2 and input_dim dimensions to return 
+        #tensor of dimensions (batch_dim, input_len - 2, bond_dim, bond_dim)
+        matrix_stack = torch.einsum('bij,ijkl->bikl',inputs_without_the_ends, self.tensors) 
+        
+        #the order of the (batch_size, input_len) dimensions are inversed for use as 
+        #input for chain_matmul_square. Matrix_stack then has dimensions 
+        #(input_len, batch_dim, bond_dim, bond_dim)
+        matrix_stack = matrix_stack.transpose(0,1)
+        
+        left = torch.einsum('bi,ij->bj', inputs[:,0,:], self.left_end_tensor)
+        right = torch.einsum('bi,ij->bj', inputs[:,-1,:], self.right_end_tensor)
+
+        partial_product = chain_matmul_square(matrix_stack)
+        product = torch.einsum('bi,bij,bj->b', left ,partial_product, right)
+        return product
+
+    def to(self, dtype):
+        super().to(dtype)
+        return self
+                
 
 class UMPS(pl.LightningModule):
 
@@ -26,7 +90,7 @@ class UMPS(pl.LightningModule):
                 input_nn_kwargs=None,
                 dtype=torch.float,
                 batch_max_parallel=4,
-                output_node_position='center'):
+                ):
         """
         A matrix produt state that has the same core tensor at each nodes. This 
         is an implementation of https://arxiv.org/abs/2003.01039
@@ -319,3 +383,14 @@ class MultiUMPS(nn.Module):
             net.to(dtype)
         
         return self
+
+if __name__=='__main__':
+    import os
+    from tensornet.dataset import MolDataset
+
+    datapath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    datapath = os.path.join(datapath, 'data/qm9_mini.csv')
+    dataset = MolDataset(datapath, smiles_col='smiles', num_features=1)
+    mps = MPS(dataset = dataset, bond_dim=20)
+    data = dataset.__getitem__(32)
+    mps(data)

@@ -56,11 +56,18 @@ class MolDataset(Dataset):
         values: tensor of dimension (batch_size, 19)
     """
 
-    def __init__(self, csvpath, scaler=None, smiles_col=None, dtype=torch.float, num_features=-1):
+    def __init__(self, 
+                csvpath, 
+                scaler=None, 
+                smiles_col=None, 
+                dtype=torch.float, 
+                num_features=-1, 
+                output_smiles=False):
 
         self.path=csvpath
         self.dtype = dtype
         self.num_features = num_features
+        self.output_smiles = output_smiles
         df = pd.read_csv(self.path)
         cols = df.columns
 
@@ -113,7 +120,10 @@ class MolDataset(Dataset):
                 values = torch.Tensor(values)
         values = values.to(self.dtype)
 
-        return parsedsmiles, values
+        if self.output_smiles == True:
+            return smiles, parsedsmiles, values
+        else:
+            return parsedsmiles, values
 
     def to(self, dtype):
         self.dtype = dtype
