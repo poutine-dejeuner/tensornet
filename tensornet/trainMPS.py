@@ -26,14 +26,14 @@ if __name__ == "__main__":
 
     scaler = TorchScalerWrapper(StandardScaler())
 
-    datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    datapath = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_mini.csv')
     dataset = MolDataset(datapath, scaler=scaler, smiles_col='smiles', num_features=1)
 
-    model = MPS(dataset=dataset, bond_dim = 20, tensor_init='eye')
+    model = MPS(dataset=dataset, bond_dim = 64, tensor_init='eye')
     
     num_workers = os.cpu_count()
     regressor = Regressor2(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
-                lr=1e-2, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
+                lr=1e-3, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE, weight_decay=1)
 
     profiler = pl.profiler.AdvancedProfiler()

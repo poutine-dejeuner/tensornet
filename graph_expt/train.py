@@ -1,18 +1,12 @@
-import os
-import torch
+import torch, os
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from ivbase.transformers.scaler import StandardScaler
 
-from tensornet.regressor import Regressor, MolGraphRegressor
-from tensornet.umps import UMPS, MultiUMPS
+from tensornet.regressor import MolGraphRegressor
 from tensornet.graph import GraphTensorNetwork, MolGraphDataset
 from tensornet.utils import TorchScalerWrapper
-
 import gnnfp
-
-
-
 import tensornet
 
 if __name__ == "__main__":

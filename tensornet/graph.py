@@ -338,7 +338,7 @@ if __name__ == '__main__':
     data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
     features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80/tree.db')
     dataset = MolGraphDataset(data_path, features_path)
-    '''
+    
     print('dataset test: list edge data')
     print(dataset.__getitem__(32))
 
@@ -354,7 +354,7 @@ if __name__ == '__main__':
         data = dataset.__getitem__(i)
         result = moltennet(data)
         print(result.tensor)
-    '''
+    
     print('static graph tensor net test')
     tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
     graph = dataset.__getitem__(32)['graph']

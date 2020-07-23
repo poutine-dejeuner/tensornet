@@ -16,6 +16,9 @@ torch.set_default_tensor_type(torch.DoubleTensor)
 
 
 class Regressor(pl.LightningModule):
+    """
+    The Regressor for the UMPS and MultiUMPS from umps.py
+    """
 
     def __init__(self, 
                 model: torch.nn.Module,
@@ -54,12 +57,9 @@ class Regressor(pl.LightningModule):
 
         self.to(dtype)
 
-        def forward(self, inputs: List[torch.Tensor]):
-            return self.model(inputs)
-       
-
-        
-
+    def forward(self, inputs: List[torch.Tensor]):
+        return self.model(inputs)
+    
     def _collate_with_padding(self, 
                                 inputs: List[torch.Tensor]) -> List[torch.Tensor]:
 
@@ -217,7 +217,9 @@ class Regressor(pl.LightningModule):
         return valid_loader
 
 class Regressor2(Regressor):
-
+    """
+    This is used with the MPS class from UMPS.py
+    """
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
 
@@ -264,6 +266,9 @@ class Regressor2(Regressor):
         return {'log': tensorboard_logs}
 
 class MolGraphRegressor(Regressor):
+    """
+    A regressor for the GraphTensorNetwork class in graph.py
+    """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -272,135 +277,29 @@ class MolGraphRegressor(Regressor):
         return optimiser
 
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1)      
-            loss += self.loss_fun(scores,numbers,reduction='sum')             
-
-        loss = loss/self.batch_size
-        
-        for ii, tensor in enumerate(tensors_x):
-            input_len = tensor.shape[1]
-            collated_tensors_x[ii, 0:input_len, :] = tensor
-
-        # Stack the input tensor_y
-        collated_tensors_y = torch.cat(tensors_y, dim=0)
-        batch_collated_inputs = [(collated_tensors_x, collated_tensors_y)]
-
-        return batch_collated_inputs
-
-
-class MolGraphRegressor(Regressor):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def _get_loss_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1)      
-            loss += self.loss_fun(scores,numbers,reduction='sum')             
-
-        loss = loss/self.batch_size
-        
-        tensorboard_logs = {f'Cross_entropy': loss}
-
-        # If there is a scaler, reverse the scaling and compute the MAE
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
-                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
-
-        return {'loss': loss, 'log': tensorboard_logs}
-
-    def _get_val_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = accuracy = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1) 
-            loss += self.loss_fun(scores,numbers,reduction='sum')
-            with torch.no_grad():
-                accuracy += torch.sum(preds == numbers).item()                
-
-        loss = loss/self.batch_size
-        accuracy = accuracy/self.batch_size
-        accuracy = torch.tensor(accuracy)
-        
-        tensorboard_logs = {f'Cross_entropy': loss, f'accuracy': accuracy}
-
-        # If there is a scaler, reverse the scaling and compute the MAE      
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
+            # Get the truth `y`, predictions and compute the MSE and MAE
+            loss = mae = 0
+            for element in batch:
+                graph = element['graph']
+                features = element['features']
+                y = element['labels']
+                preds = self(mol_graph = graph, features = features)
                 scaler = self.dataset.scaler
+                loss += self.loss_fun(preds,y)
+                mae += F.l1_loss(preds, y, reduction='sum')
+
+            loss = loss/self.batch_size
+            mae = mae/self.batch_size
+            
+            tensorboard_logs = {f'MSE_loss/{step_name}': loss, f'MAE_norm/{step_name}': mae}
+
+            # If there is a scaler, reverse the scaling and compute the MAE
+            if scaler is not None:
                 preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
                 y_inv = scaler.inverse_transform(y.clone().detach().cpu())
                 tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 
-        return {'loss': loss, 'log': tensorboard_logs}
-
-    def train_dataloader(self):
-        num_workers = self.num_workers 
-        train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
-                num_workers=num_workers, sampler = self.train_sampler,
-                 collate_fn=None, drop_last=True)
-        return train_loader
-
-    def training_step(self, batch, batch_idx):
-        return self._get_loss_logs(batch, batch_idx, step_name='train')
-
- 
-    def validation_step(self, batch, batch_idx):
-        return self._get_val_logs(batch, batch_idx, step_name='val')
-   
-        tensorboard_logs = {f'Cross_entropy': loss}
-
-        # If there is a scaler, reverse the scaling and compute the MAE
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
-                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
-
-        return {'loss': loss, 'log': tensorboard_logs}
-
-    def _get_val_logs(self, batch, batch_idx, step_name:str):
-        # Get the truth `y`, predictions and compute the MSE and MAE
-        loss = accuracy = 0
-        for mini_batch in batch:
-            x, y = mini_batch
-            scores = self(x)
-            _, preds = torch.max(scores,1)
-            _, numbers = torch.max(y,1) 
-            loss += self.loss_fun(scores,numbers,reduction='sum')
-            with torch.no_grad():
-                accuracy += torch.sum(preds == numbers).item()                
-
-        loss = loss/self.batch_size
-        accuracy = accuracy/self.batch_size
-        accuracy = torch.tensor(accuracy)
-        
-        tensorboard_logs = {f'Cross_entropy': loss, f'accuracy': accuracy}
-
-        # If there is a scaler, reverse the scaling and compute the MAE      
-        if hasattr(self.dataset,'scaler'):
-            if self.dataset.scaler is not None:
-                scaler = self.dataset.scaler
-                preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
-                y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
-
-        return {'loss': loss, 'log': tensorboard_logs}
+            return {'loss': loss, 'log': tensorboard_logs}
 
     def train_dataloader(self):
         num_workers = self.num_workers 
@@ -413,19 +312,13 @@ class MolGraphRegressor(Regressor):
         num_workers = self.num_workers
         valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.valid_sampler,
-                 collate_fn=None, drop_last=True)
+                    collate_fn=None, drop_last=True)
         return valid_loader
 
-    def training_step(self, batch, batch_idx):
-        return self._get_loss_logs(batch, batch_idx, step_name='train')
-
- 
-    def validation_step(self, batch, batch_idx):
-        return self._get_val_logs(batch, batch_idx, step_name='val')
-
-
-
 class ClassifyRegressor(Regressor):
+    """
+    A regressor for classification tasks with the UMPS class in umps.py
+    """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
