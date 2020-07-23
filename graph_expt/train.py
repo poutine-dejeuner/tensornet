@@ -4,7 +4,7 @@ from pytorch_lightning import Trainer
 from ivbase.transformers.scaler import StandardScaler
 
 from tensornet.regressor import MolGraphRegressor
-from tensornet.graph import GraphTensorNetwork, MolGraphDataset
+from tensornet.graph import StaticGraphTensorNetwork, GraphTensorNetwork, MolGraphDataset
 from tensornet.utils import TorchScalerWrapper
 import gnnfp
 import tensornet
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     features_path = os.path.join(file_path, 'data/qm9_mini/tree.db')
     dataset = MolGraphDataset(data_path, features_path, values_column = 0)
 
-    model = GraphTensorNetwork(dataset = dataset, max_degree = 4, bond_dim = 20)
+    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, bond_dim = 20)
     
     num_workers = 0 #os.cpu_count()
     regressor = MolGraphRegressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
@@ -39,5 +39,3 @@ if __name__ == "__main__":
     profiler = pl.profiler.AdvancedProfiler()
     trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=6, profiler=profiler)
     trainer.fit(regressor)
-
-

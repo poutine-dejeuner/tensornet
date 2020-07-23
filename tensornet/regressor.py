@@ -283,7 +283,7 @@ class MolGraphRegressor(Regressor):
                 graph = element['graph']
                 features = element['features']
                 y = element['labels']
-                preds = self(mol_graph = graph, features = features)
+                preds = self.model.forward(mol_graph = graph, features = features)
                 scaler = self.dataset.scaler
                 loss += self.loss_fun(preds,y)
                 mae += F.l1_loss(preds, y, reduction='sum')
@@ -301,18 +301,24 @@ class MolGraphRegressor(Regressor):
 
             return {'loss': loss, 'log': tensorboard_logs}
 
+    
+    def dict_collate(self, samples):
+        return samples
+        #batched_samples = {k: [dic[k] for dic in samples] for k in samples[0].keys()}
+        #return batched_samples
+
     def train_dataloader(self):
         num_workers = self.num_workers 
         train_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.train_sampler,
-                 collate_fn=None, drop_last=True)
+                 collate_fn=self.dict_collate, drop_last=True)
         return train_loader
 
     def val_dataloader(self):
         num_workers = self.num_workers
         valid_loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.batch_size, 
                 num_workers=num_workers, sampler = self.valid_sampler,
-                    collate_fn=None, drop_last=True)
+                    collate_fn=self.dict_collate, drop_last=True)
         return valid_loader
 
 class ClassifyRegressor(Regressor):
