@@ -6,7 +6,6 @@ from ivbase.transformers.scaler import StandardScaler
 from tensornet.regressor import MolGraphRegressor
 from tensornet.graph import StaticGraphTensorNetwork, GraphTensorNetwork, MolGraphDataset
 from tensornet.utils import TorchScalerWrapper
-import gnnfp
 import tensornet
 
 if __name__ == "__main__":
@@ -29,11 +28,11 @@ if __name__ == "__main__":
     features_path = os.path.join(file_path, 'data/qm9_mini/tree.db')
     dataset = MolGraphDataset(data_path, features_path, values_column = 0)
 
-    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, bond_dim = 20)
+    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, bond_dim = 2)
     
     num_workers = 0 #os.cpu_count()
     regressor = MolGraphRegressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
-                lr=1e-3, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
+                lr=1e-3, batch_size=4, validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE, weight_decay=1)
 
     profiler = pl.profiler.AdvancedProfiler()
