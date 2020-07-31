@@ -28,7 +28,7 @@ if __name__ == "__main__":
     features_path = os.path.join(file_path, 'data/qm9_mini/tree.db')
     dataset = MolGraphDataset(data_path, features_path, values_column = 0)
 
-    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, bond_dim = 2)
+    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, max_depth = 4, bond_dim = 2)
     
     num_workers = 0 #os.cpu_count()
     regressor = MolGraphRegressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 

@@ -20,6 +20,10 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 max_depth = 5,
                 output_dim = 1
         ):
+        '''
+        max_depth: this is the number of levels in the graph. if max_depth=1, there is 1 node, if max_depth=2
+        there are 1+max_degree nodes, if max_depth=3 there are 1 + max_degree + max_degree(max_degree-1).
+        '''
         super().__init__()
         self.dataset = dataset
         self.bond_dim = bond_dim
@@ -82,11 +86,11 @@ def connect_inputs(network, mol_graph, features, input_dim):
             net_parent = graph_net_dict[parent]
             net_children = net_child_dict[net_parent]
             for child in mol_child_dict[parent]:
+                node = None
                 for node in net_children:
-                    #INPUT NODE GETS IN OUTPUT OF get_graph_children
                     if node['input'].is_dangling() == True:
                         break
-                graph_net_dict[child]=node
+                graph_net_dict[child] = node
                 input_node = tn.Node(features[child])
                 node['input'] ^ input_node[0]    
     
@@ -115,9 +119,10 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim)
     node.add_node(1)
     branch = nx.generators.classic.balanced_tree(max_degree - 1, max_depth -1)
     size = len(branch)
-    G = nx.disjoint_union(branch, branch)
-    G = nx.disjoint_union(G, branch)
-    G = nx.disjoint_union(G, branch)
+    G = branch.copy()
+    for i in range(max_degree):
+        G = nx.disjoint_union(G, branch)
+
     G = nx.disjoint_union(G, node)
     G.add_edges_from([(0,4*size), (size, 4*size), (2*size,4*size), (3*size,4*size)])
     edges = list(G.edges())
@@ -146,7 +151,7 @@ def get_graph_children(graph, child_dict):
     """
     Ths takes a tree graph with a root and a list of nodes and returns the children nodes.
     """
-    if not isinstance(graph, nx.classes.graph.Graph):
+    if isinstance(graph, list):
         new_child_dict = dict()
         for parent in child_dict:
             for child in child_dict[parent]:
@@ -391,6 +396,10 @@ if __name__ == '__main__':
     new_child_dict = get_graph_children(G,child_dict)
     print(new_child_dict)
     assert(new_child_dict=={0: [1, 2, 3], 13: [14, 15, 16], 26: [27, 28, 29], 39: [40, 41, 42]})
+
+    net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, max_depth = 4, output_dim=0)
+    child = get_graph_children(net, net[-1])
+    print("?")
     
     tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 2)
     tensor_list, net = all_random_diag_init(input_dim=2, bond_dim=2, max_degree=4,max_depth=3,output_dim=0)
@@ -401,3 +410,4 @@ if __name__ == '__main__':
     print(children)
     print('ok')
     
+    #TODO DEBUG STE SHIT LA
