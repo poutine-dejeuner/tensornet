@@ -18,7 +18,8 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 bond_dim = 20,
                 max_degree = 4,
                 max_depth = 5,
-                output_dim = 1
+                output_dim = 1,
+                embedding_dim = 32
         ):
         '''
         max_depth: this is the number of levels in the graph. if max_depth=1, there is 1 node, if max_depth=2
@@ -30,10 +31,14 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.max_degree = max_degree
         self.max_depth = max_depth
         self.output_dim = output_dim
-        self.input_dim = dataset.vocab_len
+        self.input_dim = embedding_dim
         
         self.tensor_list, self.network = all_random_diag_init(
             self.input_dim, bond_dim, max_degree, max_depth, output_dim)
+
+        self.embedding = torch.nn.Embedding(num_embeddings = dataset.vocab_len,
+                                            embedding_dim = embedding_dim
+                                            )
 
     def forward(self, mol_graph, features):
         """
@@ -45,8 +50,18 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         # mapping the edges to their copies.
         network = tn.copy(self.network)
         network = list( network[0].values() )
-        network = connect_inputs(network, mol_graph, features, self.input_dim)        
-        return tn.contractors.auto(network, ignore_edge_order=True)
+        features = self.embedding(features)
+        network = connect_inputs(network, mol_graph, features, self.input_dim)
+        while len(network)>1:
+            for node in network:
+                if len(node.tensor.shape)==1:
+                    edge = node.edges[0]
+                    network.remove(edge.node1)
+                    network.remove(edge.node2)
+                    new_node = tn.contract(edge)
+                    network.append(new_node)
+
+        return network[0].tensor
 
 def connect_inputs(network, mol_graph, features, input_dim):
     """
@@ -70,6 +85,7 @@ def connect_inputs(network, mol_graph, features, input_dim):
     # first connect the input of the center of the molecule to the center of the network
     center = nx.algorithms.distance_measures.center(mol_graph)[0]
     input_node = tn.Node(features[center])
+    input_nodes = [input_node]
     
     mol_child_dict = {center: list(nx.neighbors(mol_graph, center))}
     net_child_dict = {network[-1]: tn.get_neighbors(network[-1])}
@@ -92,7 +108,8 @@ def connect_inputs(network, mol_graph, features, input_dim):
                         break
                 graph_net_dict[child] = node
                 input_node = tn.Node(features[child])
-                node['input'] ^ input_node[0]    
+                node['input'] ^ input_node[0]
+                input_nodes.append(input_node)
     
         #get children of atoms in atom_list. A parent list is needed to remove them from 
         #the neighbors to get the next iterations child list.
@@ -102,10 +119,12 @@ def connect_inputs(network, mol_graph, features, input_dim):
     dangling_edges = tn.get_all_dangling(network)
     padding_vect = torch.zeros(input_dim)
     padding_vect[0] = 1
+    
     for edge in dangling_edges:
         padding_node = tn.Node(padding_vect)
         edge ^ padding_node[0]
-
+        input_nodes.append(padding_node)
+    network = network + input_nodes
     return network
 
 def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim):
@@ -119,20 +138,21 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim)
     node.add_node(1)
     branch = nx.generators.classic.balanced_tree(max_degree - 1, max_depth -1)
     size = len(branch)
-    G = branch.copy()
+    G = nx.Graph()
     for i in range(max_degree):
         G = nx.disjoint_union(G, branch)
 
     G = nx.disjoint_union(G, node)
     G.add_edges_from([(0,4*size), (size, 4*size), (2*size,4*size), (3*size,4*size)])
     edges = list(G.edges())
+    assert(nx.algorithms.components.is_connected(G)==True)
 
     #init core tensors and create Tensornetworks Nodes
     tensor_list = torch.nn.ParameterList()
     for node in G.nodes():
         degree = G.degree(node)
         shape = (input_dim,) + tuple(bond_dim for i in range(degree))
-        tensor = torch.nn.Parameter(tensor_tree_node_init(shape))
+        tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=1e-16))
         tensor_list.append(tensor)
     axis_names = [ ['input']+['bond'+str(i) for i in range(len(tensor.shape) - 1)] for tensor in tensor_list ]
     network_nodes = [tn.Node(tensor, axis_names=name) for tensor, name in zip(tensor_list, axis_names)]
@@ -291,7 +311,6 @@ class GraphTensorNetwork(pl.LightningModule):
 
         return nodes, atom_features
 
-
 class MolGraphDataset(GraphFPDataset):
     def __init__(self, 
                 data_path, 
@@ -299,7 +318,8 @@ class MolGraphDataset(GraphFPDataset):
                 values_column=0, 
                 cache_file_path=None, 
                 smiles_column="smiles", 
-                ignore_fails=True
+                ignore_fails=True,
+                scaler = None
                 ):
         super().__init__(data_path = data_path,
                         features_path = features_path,
@@ -311,6 +331,12 @@ class MolGraphDataset(GraphFPDataset):
         self.vocab_len = len(self.vocabulary)
         self.batch_max_parallel = 1
         self.values_column = values_column
+        self.labels = self.labels[:,values_column]
+        
+        self.scaler = None
+        if scaler is not None:
+            values = self.labels
+            self.scaler = scaler.fit(values)
 
     def build_fragment_vocabulary(self):
         fragments = {}
@@ -329,10 +355,20 @@ class MolGraphDataset(GraphFPDataset):
         smiles, graph, labels, mask = super().__getitem__(item)
         features = self.featurise(graph)
         edges = torch.stack(graph.edges()).T
-        labels = labels[self.values_column]
 
         return {'smiles':smiles, 'graph':graph, 'edges':edges, 'features':features, 'labels':labels, 'mask':mask}
 
+    def featurise(self, graph):
+        """
+        Takes a DGL graph object and returns a list of indices for self.vocabulary for each node.
+        """
+        feature_indices = torch.LongTensor(len(graph.nodes_dict))
+        for i, node in enumerate(graph.nodes_dict):
+            smiles = graph.nodes_dict[node]['smiles']
+            index = self.vocabulary.index(smiles)
+            feature_indices[i] = index
+        return feature_indices
+    '''
     def featurise(self, graph):
         """
         Takes a DGL graph object and returns a list of one hot vectors for each node.
@@ -346,6 +382,47 @@ class MolGraphDataset(GraphFPDataset):
             features_list[node] = feature
         
         return features_list
+    '''
+
+import opt_einsum as oe
+
+class MyOptimizer(oe.paths.PathOptimizer):
+
+    def __call__(self, inputs, output, size_dict, memory_limit=None):
+        '''
+        Parameters
+            ----------
+            inputs : list[set[str]]
+                The indices of each input array.
+            outputs : set[str]
+                The output indices
+            size_dict : dict[str, int]
+                The size of each index
+            memory_limit : int, optional
+                If given, the maximum allowed memory.
+        '''
+        '''
+        edge = inputs[0].pop()
+        node = edge.node1
+        node_list = list(tn.reachable(node))
+        size_list = [node.tensor.shape for node in node_list]
+        min_length = min([len(size) for size in size_list])
+        short_size_nodes = [node for node in node_list if len(node.tensor.shape)==min_length]
+        #the nodes in short_size_nodes will be vectors so the first edge is always the one we contract
+        #(there are no other edges)
+        edge_list = [node.get_all_edges()[0] for node in short_size_nodes]
+        edge_list = [(node_list.index(edge.node1), node_list.index(edge.node2)) for edge in edge_list]
+        '''
+        edge = inputs[0].pop()
+        node = edge.node1
+        node_list = list(tn.reachable(node))
+        for node in node_list:
+            if len(node.tensor.shape)==1:
+                break
+        edge = node.get_all_edges()[0]
+        edge_list = (node_list.index(edge.node1),node_list.index(edge.node2))
+        return [edge_list]
+
 
 if __name__ == '__main__':
     import os, tensornet
@@ -353,14 +430,14 @@ if __name__ == '__main__':
     from gnnfp.utils import GraphFPDataset
 
     
-    data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_32.csv')
-    features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_32/tree.db')
+    data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80/tree.db')
     dataset = MolGraphDataset(data_path, features_path)
     
-    '''
+    
     print('dataset test: list edge data')
     print(dataset.__getitem__(16))
-
+    '''
     print('dynamic graph tensor network test')
     moltennet = GraphTensorNetwork(
         dataset=dataset,
@@ -397,7 +474,7 @@ if __name__ == '__main__':
     print(new_child_dict)
     assert(new_child_dict=={0: [1, 2, 3], 13: [14, 15, 16], 26: [27, 28, 29], 39: [40, 41, 42]})
 
-    net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, max_depth = 4, output_dim=0)
+    tensor_list, net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, max_depth = 4, output_dim=0)
     child = get_graph_children(net, net[-1])
     print("?")
     
@@ -409,5 +486,3 @@ if __name__ == '__main__':
     children = {center:children}
     print(children)
     print('ok')
-    
-    #TODO DEBUG STE SHIT LA

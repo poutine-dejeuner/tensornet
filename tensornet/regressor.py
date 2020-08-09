@@ -295,7 +295,9 @@ class MolGraphRegressor(Regressor):
 
             # If there is a scaler, reverse the scaling and compute the MAE
             if scaler is not None:
+                preds = preds.unsqueeze(dim=0)
                 preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
+                y=y.unsqueeze(dim=0)
                 y_inv = scaler.inverse_transform(y.clone().detach().cpu())
                 tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
 

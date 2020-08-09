@@ -16,6 +16,7 @@ if __name__ == "__main__":
     torch.random.manual_seed(RANDOM_SEED)
     torch.set_default_dtype(DTYPE)
 
+    
     if torch.cuda.is_available():
         gpus = 1
     else:
@@ -24,15 +25,18 @@ if __name__ == "__main__":
     scaler = TorchScalerWrapper(StandardScaler())
 
     file_path = os.path.dirname(tensornet.__path__._path[0])
-    data_path = os.path.join(file_path, 'data/qm9_mini.csv')
-    features_path = os.path.join(file_path, 'data/qm9_mini/tree.db')
-    dataset = MolGraphDataset(data_path, features_path, values_column = 0)
+    data_path = os.path.join(file_path, 'data/qm9_1e4.csv')
+    features_path = os.path.join(file_path, 'data/qm9_1e4/tree.db')
+    cache_file_path = os.path.join(file_path, 'data/qm9_1e4/cache.hmm')
+    cache_file_path = None
+    dataset = MolGraphDataset(data_path, features_path, values_column = 0, scaler = scaler, 
+    cache_file_path=cache_file_path)
 
-    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, max_depth = 4, bond_dim = 2)
+    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, max_depth = 4, bond_dim = 20, embedding_dim = 16)
     
-    num_workers = 0 #os.cpu_count()
+    num_workers = os.cpu_count()
     regressor = MolGraphRegressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
-                lr=1e-3, batch_size=4, validation_split=0.2, random_seed=RANDOM_SEED, 
+                lr=1e-5, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
                 num_workers=num_workers, dtype=DTYPE, weight_decay=1)
 
     profiler = pl.profiler.AdvancedProfiler()
