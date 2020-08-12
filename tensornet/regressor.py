@@ -273,8 +273,14 @@ class MolGraphRegressor(Regressor):
         super().__init__(**kwargs)
 
     def configure_optimizers(self):
-        optimiser = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
-        return optimiser
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer = optimizer,
+                                                            mode = 'min',
+                                                            factor = 0.1,
+                                                            patience = 1,
+                                                            threshold = 1)
+
+        return [optimizer], [scheduler]
 
     def _get_loss_logs(self, batch, batch_idx, step_name:str):
             # Get the truth `y`, predictions and compute the MSE and MAE
@@ -291,7 +297,7 @@ class MolGraphRegressor(Regressor):
             loss = loss/self.batch_size
             mae = mae/self.batch_size
             
-            tensorboard_logs = {f'MSE_loss/{step_name}': loss, f'MAE_norm/{step_name}': mae}
+            tensorboard_logs = {f'{step_name}_loss': loss, f'{step_name}_MAE_norm': mae}
 
             # If there is a scaler, reverse the scaling and compute the MAE
             if scaler is not None:
@@ -299,7 +305,7 @@ class MolGraphRegressor(Regressor):
                 preds_inv = scaler.inverse_transform(preds.clone().detach().cpu())
                 y=y.unsqueeze(dim=0)
                 y_inv = scaler.inverse_transform(y.clone().detach().cpu())
-                tensorboard_logs[f'MAE_global/{step_name}'] = F.l1_loss(preds_inv, y_inv)
+                tensorboard_logs[f'{step_name}_MAE_global'] = F.l1_loss(preds_inv, y_inv)
 
             return {'loss': loss, 'log': tensorboard_logs}
 

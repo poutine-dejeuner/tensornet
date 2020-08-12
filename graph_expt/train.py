@@ -23,22 +23,27 @@ if __name__ == "__main__":
         gpus = None
 
     scaler = TorchScalerWrapper(StandardScaler())
-
+    name = 'data/qm9_80'
     file_path = os.path.dirname(tensornet.__path__._path[0])
-    data_path = os.path.join(file_path, 'data/qm9_1e4.csv')
-    features_path = os.path.join(file_path, 'data/qm9_1e4/tree.db')
-    cache_file_path = os.path.join(file_path, 'data/qm9_1e4/cache.hmm')
+    data_path = os.path.join(file_path, name + '.csv')
+    features_path = os.path.join(file_path, name + '/tree.db')
+    cache_file_path = os.path.join(file_path, name + '/cache.hmm')
     cache_file_path = None
-    dataset = MolGraphDataset(data_path, features_path, values_column = 0, scaler = scaler, 
-    cache_file_path=cache_file_path)
+    dataset = MolGraphDataset(data_path, features_path, num_labels = 1, scaler = scaler, 
+    cache_file_path = cache_file_path)
 
-    model = StaticGraphTensorNetwork(dataset = dataset, max_degree = 4, max_depth = 4, bond_dim = 20, embedding_dim = 16)
+    model = StaticGraphTensorNetwork(dataset = dataset, 
+                                    max_degree = 4, 
+                                    max_depth = 4, 
+                                    bond_dim = 10, 
+                                    embedding_dim = 16)
     
     num_workers = os.cpu_count()
-    regressor = MolGraphRegressor(model=model, dataset=dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
-                lr=1e-5, batch_size=16, validation_split=0.2, random_seed=RANDOM_SEED, 
-                num_workers=num_workers, dtype=DTYPE, weight_decay=1)
+    regressor = MolGraphRegressor(model = model, dataset = dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
+                lr = 1e-4, batch_size = 16, validation_split = 0.2, random_seed = RANDOM_SEED, 
+                num_workers = num_workers, dtype = DTYPE, weight_decay = 1)
 
-    profiler = pl.profiler.AdvancedProfiler()
-    trainer = Trainer(gpus=gpus, min_epochs=1, max_epochs=6, profiler=profiler)
+    #profiler = pl.profiler.AdvancedProfiler()
+    profiler = None
+    trainer = Trainer(gpus = gpus, min_epochs = 1, max_epochs = 20, profiler = profiler)
     trainer.fit(regressor)

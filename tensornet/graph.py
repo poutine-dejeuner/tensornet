@@ -18,23 +18,30 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 bond_dim = 20,
                 max_degree = 4,
                 max_depth = 5,
-                output_dim = 1,
-                embedding_dim = 32
+                embedding_dim = 32,
+                std = 1e-8
         ):
         '''
-        max_depth: this is the number of levels in the graph. if max_depth=1, there is 1 node, if max_depth=2
-        there are 1+max_degree nodes, if max_depth=3 there are 1 + max_degree + max_degree(max_degree-1).
+        Parameters
+            ----------
+            bond_dim: the dimension of the axis shared by the non input nodes in the network.
+            max_degree: the nodes will have max_degree + 1 indices, one for the input and the others to connect 
+            with the non input nodes.
+            max_depth: this is the number of levels in the graph. if max_depth=1, there is 1 node, if max_depth=2
+            there are 1+max_degree nodes, if max_depth=3 there are 1 + max_degree + max_degree(max_degree-1).
+            output_dim: the dimension of the output.
+            embedding_dim: the dimension of the embedding of the inputs.
         '''
         super().__init__()
         self.dataset = dataset
         self.bond_dim = bond_dim
         self.max_degree = max_degree
         self.max_depth = max_depth
-        self.output_dim = output_dim
         self.input_dim = embedding_dim
+        self.output_dim = len(dataset.__getitem__(0)['labels'])
         
         self.tensor_list, self.network = all_random_diag_init(
-            self.input_dim, bond_dim, max_degree, max_depth, output_dim)
+            self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std)
 
         self.embedding = torch.nn.Embedding(num_embeddings = dataset.vocab_len,
                                             embedding_dim = embedding_dim
@@ -44,12 +51,13 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         """
         makes a copy of self.network, connects the graphs feature vectors embedding mol_graph in the network 
         and puts padding vectors at all other inputs. Contracts the network.
-        TODO: tn.contractors.auto is used. If slow, try to contract the inputs first.
+        TODO: verifier que le garbage collection jette les nodes aux poubelles
         """
         #tn.copy returns a tuple containing a dictionary mapping the nodes to their copies and a dictionary 
         # mapping the edges to their copies.
         network = tn.copy(self.network)
         network = list( network[0].values() )
+        #network = self.network
         features = self.embedding(features)
         network = connect_inputs(network, mol_graph, features, self.input_dim)
         while len(network)>1:
@@ -60,6 +68,9 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                     network.remove(edge.node2)
                     new_node = tn.contract(edge)
                     network.append(new_node)
+                    #for debugging the mysterious zero product
+                    #norm_list=[torch.norm(node.tensor) for node in network]
+                    #print('min,max='+str(min(norm_list))+str(max(norm_list)))
 
         return network[0].tensor
 
@@ -117,6 +128,9 @@ def connect_inputs(network, mol_graph, features, input_dim):
         net_child_dict = next_net_child_dict
 
     dangling_edges = tn.get_all_dangling(network)
+    for edge in dangling_edges:
+        if edge.name == 'output':
+            dangling_edges.remove(edge)
     padding_vect = torch.zeros(input_dim)
     padding_vect[0] = 1
     
@@ -127,7 +141,7 @@ def connect_inputs(network, mol_graph, features, input_dim):
     network = network + input_nodes
     return network
 
-def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim):
+def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim, std):
     """
     Initialises the tensors of the network and connects them, leaving the input edges free. 
     Initialisation of tensors is done with utils.tensor_tree_node_init.
@@ -152,12 +166,17 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim)
     for node in G.nodes():
         degree = G.degree(node)
         shape = (input_dim,) + tuple(bond_dim for i in range(degree))
-        tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=1e-16))
+        tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
         tensor_list.append(tensor)
     axis_names = [ ['input']+['bond'+str(i) for i in range(len(tensor.shape) - 1)] for tensor in tensor_list ]
+    if output_dim>1:
+        shape = (input_dim,) + tuple(bond_dim for i in range(degree)) + (output_dim,)
+        tensor_list[-1] = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
+        axis_names[-1] = ['input']+['bond'+str(i) for i in range(max_degree)] + ['output']
+    
     network_nodes = [tn.Node(tensor, axis_names=name) for tensor, name in zip(tensor_list, axis_names)]
     network_nodes[-1].name = 'center'
-
+    
     #connect nodes
     for edge in edges:
         node0, node1 = edge
@@ -169,7 +188,8 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim)
 
 def get_graph_children(graph, child_dict):
     """
-    Ths takes a tree graph with a root and a list of nodes and returns the children nodes.
+    This takes a tree graph and a dict of parent:children and returns a dict of parent:children with the parents
+    the children of the first dict
     """
     if isinstance(graph, list):
         new_child_dict = dict()
@@ -315,11 +335,12 @@ class MolGraphDataset(GraphFPDataset):
     def __init__(self, 
                 data_path, 
                 features_path,
-                values_column=0, 
+                num_labels=0, 
                 cache_file_path=None, 
                 smiles_column="smiles", 
                 ignore_fails=True,
-                scaler = None
+                scaler = None,
+                feature_type = 'index'
                 ):
         super().__init__(data_path = data_path,
                         features_path = features_path,
@@ -330,9 +351,12 @@ class MolGraphDataset(GraphFPDataset):
         self.vocabulary = self.build_fragment_vocabulary()
         self.vocab_len = len(self.vocabulary)
         self.batch_max_parallel = 1
-        self.values_column = values_column
-        self.labels = self.labels[:,values_column]
-        
+        self.num_labels = num_labels
+        self.feature_type = feature_type
+
+        if num_labels != -1:
+            self.labels = self.labels[:,0:num_labels]
+            
         self.scaler = None
         if scaler is not None:
             values = self.labels
@@ -360,29 +384,127 @@ class MolGraphDataset(GraphFPDataset):
 
     def featurise(self, graph):
         """
-        Takes a DGL graph object and returns a list of indices for self.vocabulary for each node.
+        Takes a DGL graph object and returns a list of indices or one-hots for self.vocabulary for each node.
         """
-        feature_indices = torch.LongTensor(len(graph.nodes_dict))
-        for i, node in enumerate(graph.nodes_dict):
-            smiles = graph.nodes_dict[node]['smiles']
-            index = self.vocabulary.index(smiles)
-            feature_indices[i] = index
-        return feature_indices
+        if self.feature_type == 'index':
+            feature_indices = torch.LongTensor(len(graph.nodes_dict))
+            for i, node in enumerate(graph.nodes_dict):
+                smiles = graph.nodes_dict[node]['smiles']
+                index = self.vocabulary.index(smiles)
+                feature_indices[i] = index
+            return feature_indices
+        elif self.feature_type == 'one-hot':
+            features_list = torch.zeros(len(graph.nodes_dict), self.vocab_len)
+            for node in graph.nodes_dict:
+                smiles = graph.nodes_dict[node]['smiles']
+                index = self.vocabulary.index(smiles)
+                feature = torch.zeros(self.vocab_len)
+                feature[index] = 1
+                features_list[node] = feature
+            return features_list
+
+if False:
+    import os, tensornet
+    import torch
+    from gnnfp.utils import GraphFPDataset
+
     '''
-    def featurise(self, graph):
-        """
-        Takes a DGL graph object and returns a list of one hot vectors for each node.
-        """
-        features_list = torch.zeros(len(graph.nodes_dict), self.vocab_len)
-        for node in graph.nodes_dict:
-            smiles = graph.nodes_dict[node]['smiles']
-            index = self.vocabulary.index(smiles)
-            feature = torch.zeros(self.vocab_len)
-            feature[index] = 1
-            features_list[node] = feature
-        
-        return features_list
+    tensor norm test
     '''
+    data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80/tree.db')
+    dataset = MolGraphDataset(data_path, features_path, num_labels=0)
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
+    graph = dataset.__getitem__(32)['graph']
+    features = dataset.__getitem__(32)['features']
+    prod = tensornet(graph,features)
+    print(prod)
+
+if __name__ == '__main__':
+    import os, tensornet
+    import torch
+    from gnnfp.utils import GraphFPDataset
+    
+    data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
+    features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80/tree.db')
+    dataset = MolGraphDataset(data_path, features_path, num_labels=0)
+    
+    
+    print('----------------------------')
+    print('dataset test: list data sample')
+    print(dataset.__getitem__(16))
+
+    '''
+    print('dynamic graph tensor network test')
+    moltennet = GraphTensorNetwork(
+        dataset=dataset,
+        max_degree=4,
+        bond_dim=20,
+        edge_structure='list'
+        )
+
+    for i in range(4,16):
+        data = dataset.__getitem__(i)
+        result = moltennet(data)
+        print(result.tensor)
+    '''
+    print('----------------------------')
+    print('static graph tensor net test')
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
+    graph = dataset.__getitem__(32)['graph']
+    features = dataset.__getitem__(32)['features']
+    print(tensornet(graph,features))
+
+    print('----------------------------')
+    print('static graph tensor net multiple labels test')
+    dataset = MolGraphDataset(data_path, features_path, num_labels=-1)
+    print('num labels=' + str(len(dataset.__getitem__(16)['labels'])))
+    graph = dataset.__getitem__(16)['graph']
+    features = dataset.__getitem__(16)['features']
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
+    print(tensornet(graph,features))
+
+    print('----------------------------')
+    print('get_graph_children test')
+
+    node = nx.Graph()
+    node.add_node(1)
+    branch = nx.generators.classic.balanced_tree(3,2)
+    size = len(branch)
+    G = nx.disjoint_union(branch, branch)
+    G = nx.disjoint_union(G, branch)
+    G = nx.disjoint_union(G, branch)
+    G.add_edges_from([(0,4*size), (size, 4*size), (2*size,4*size), (3*size,4*size)])
+    center = 52
+    child = nx.neighbors(G,center)
+    child_dict = {center:child}
+    new_child_dict = get_graph_children(G,child_dict)
+    print(new_child_dict)
+    assert(new_child_dict=={0: [1, 2, 3], 13: [14, 15, 16], 26: [27, 28, 29], 39: [40, 41, 42]})
+
+    print('dgl graph:')
+    tensor_list, net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, 
+    max_depth = 4, output_dim=0, std = 1e-8)
+    child_dict = {net[-1] : list(tn.get_neighbors(net[-1]))}
+    child = get_graph_children(graph = net, child_dict=child_dict)
+    child_list = [len(ch) for ch in list(child.values())]
+    print(child_list)
+    assert( [len(ch) for ch in list(child.values())] == [3,3,3,3])
+    
+    print('tensornetwork graph:')
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 2)
+    tensor_list, net = all_random_diag_init(input_dim=2, bond_dim=2, max_degree=4,max_depth=3,output_dim=0, std=1e-16)
+    center = net[-1]
+    assert(center.name=='center')
+    child_dict = {net[-1]: tn.get_neighbors(net[-1])}
+    child = get_graph_children(net, child_dict)
+    child_list = [len(ch) for ch in child.values()]
+    print(child_list)
+    assert(child_list == [3,3,3,3])
+
+
+
+
 
 import opt_einsum as oe
 
@@ -422,67 +544,3 @@ class MyOptimizer(oe.paths.PathOptimizer):
         edge = node.get_all_edges()[0]
         edge_list = (node_list.index(edge.node1),node_list.index(edge.node2))
         return [edge_list]
-
-
-if __name__ == '__main__':
-    import os, tensornet
-    import torch
-    from gnnfp.utils import GraphFPDataset
-
-    
-    data_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80.csv')
-    features_path = os.path.join(os.path.dirname(tensornet.__path__._path[0]), 'data/qm9_80/tree.db')
-    dataset = MolGraphDataset(data_path, features_path)
-    
-    
-    print('dataset test: list edge data')
-    print(dataset.__getitem__(16))
-    '''
-    print('dynamic graph tensor network test')
-    moltennet = GraphTensorNetwork(
-        dataset=dataset,
-        max_degree=4,
-        bond_dim=20,
-        edge_structure='list'
-        )
-
-    for i in range(4,16):
-        data = dataset.__getitem__(i)
-        result = moltennet(data)
-        print(result.tensor)
-    
-    print('static graph tensor net test')
-    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
-    graph = dataset.__getitem__(32)['graph']
-    features = dataset.__getitem__(32)['features']
-    print(tensornet(graph,features))
-    '''
-    print('get_graph_children test')
-
-    node = nx.Graph()
-    node.add_node(1)
-    branch = nx.generators.classic.balanced_tree(3,2)
-    size = len(branch)
-    G = nx.disjoint_union(branch, branch)
-    G = nx.disjoint_union(G, branch)
-    G = nx.disjoint_union(G, branch)
-    G.add_edges_from([(0,4*size), (size, 4*size), (2*size,4*size), (3*size,4*size)])
-    center = 52
-    child = nx.neighbors(G,center)
-    child_dict = {center:child}
-    new_child_dict = get_graph_children(G,child_dict)
-    print(new_child_dict)
-    assert(new_child_dict=={0: [1, 2, 3], 13: [14, 15, 16], 26: [27, 28, 29], 39: [40, 41, 42]})
-
-    tensor_list, net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, max_depth = 4, output_dim=0)
-    child = get_graph_children(net, net[-1])
-    print("?")
-    
-    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 2)
-    tensor_list, net = all_random_diag_init(input_dim=2, bond_dim=2, max_degree=4,max_depth=3,output_dim=0)
-    center = net[-1]
-    print(center[0].name)
-    children = tn.get_neighbors(center)
-    children = {center:children}
-    print(children)
-    print('ok')

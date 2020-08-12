@@ -14,20 +14,34 @@ def tensor_tree_node_init(shape, std=1e-8):
     This returns a tensor in the given shape. It is constructed from tensor with ones 
     on its diagonal and expanded in the first dimension. Some noise is added. The noise 
     is sampled from a normal distribution with mean 0 and variance std.
-    
-    TODO: Try initialising tensors by creating a bond_dim x bond_dim matrix and expanding
-    in remaining dimensions.
     """
-    if len(shape)>1:
-        diag = torch.zeros(shape[1:])
-        #set ones on diagonal
+    if len(shape)>2:
         bond_dim = shape[1]
-        idx = list(range(bond_dim))
-        idx = [idx for j in range(len(shape)-1)]
-        diag[idx] = 1
+        if shape[-1]==shape[-2]:
+            diag = torch.zeros(shape[1:])
+            idx = list(range(bond_dim))
+            idx = [idx for j in range(len(diag.shape))]
+            diag[idx] = 1
+            diag = diag.unsqueeze(dim=0)
+
+        elif shape[-1] != shape[-2]:
+            diag = torch.zeros(shape[1:-1])
+            idx = list(range(bond_dim))
+            idx = [idx for j in range(len(diag.shape))]
+            diag[idx] = 1
+            diag = diag.unsqueeze(dim=0)
+            diag = diag.unsqueeze(dim=-1)
+                
         diag = diag.expand(shape)
         noise = math.sqrt(std)*torch.randn(shape)
+        tensor = diag + noise   
+    elif len(shape)==2:
+        diag = torch.zeros(shape)
+        for i in range(min(shape[0],shape[1])):
+            diag[i,i]=1
+        noise = math.sqrt(std)*torch.randn(shape)
         tensor = diag + noise
+
     elif len(shape)==1:
         noise = math.sqrt(std)*torch.randn(shape)
         tensor = torch.zeros(shape) + noise
@@ -59,8 +73,7 @@ def random_tensor(shape, std = 1e-8, **kwargs):
 def evaluate_input(node_list, input_list, dtype=torch.float):
     """
     Contract input vectors with tensor network to get scalar output
-​
-    Args:
+​    Args:
         node_list:   List of nodes with dangling edges of a tensor network
         input_list:  List of inputs for each of the nodes in node_list.
                      When processing a batch of inputs, a list of matrices 
@@ -260,3 +273,13 @@ class PyTorchBackendDevice(PyTorchBackend):
     def convert_to_tensor(self, tensor: Tensor) -> Tensor:
         result = torch.as_tensor(tensor, device=self.device)
         return result
+
+if __name__=="__main__":
+    print('tensor_tree_node_init test')
+    tensor = tensor_tree_node_init(shape = (2,4,4,2))
+    v1 = torch.rand(2)
+    v2 = torch.rand(4)
+    v3 = torch.rand(4)
+    prod = torch.einsum('i,j,k,ijkl->l', v1,v2,v3,tensor)
+    print(prod)
+    assert(prod.shape==torch.Size([2]))
