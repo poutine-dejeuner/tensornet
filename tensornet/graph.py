@@ -40,7 +40,7 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.input_dim = embedding_dim
         self.output_dim = len(dataset.__getitem__(0)['labels'])
         
-        self.tensor_list, self.network = all_random_diag_init(
+        self.tensor_list, self.network, self.edges = all_random_diag_init(
             self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std)
 
         self.embedding = torch.nn.Embedding(num_embeddings = dataset.vocab_len,
@@ -51,13 +51,13 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         """
         makes a copy of self.network, connects the graphs feature vectors embedding mol_graph in the network 
         and puts padding vectors at all other inputs. Contracts the network.
-        TODO: verifier que le garbage collection jette les nodes aux poubelles
         """
         #tn.copy returns a tuple containing a dictionary mapping the nodes to their copies and a dictionary 
         # mapping the edges to their copies.
-        network = tn.copy(self.network)
-        network = list( network[0].values() )
-        #network = self.network
+        #network = tn.copy(self.network)
+        #network = list( network[0].values() )
+        network = self.network
+        self.connect_nodes()
         features = self.embedding(features)
         network = connect_inputs(network, mol_graph, features, self.input_dim)
         while len(network)>1:
@@ -73,6 +73,18 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                     #print('min,max='+str(min(norm_list))+str(max(norm_list)))
 
         return network[0].tensor
+
+    def connect_nodes(self):
+        """
+        Connects the core nodes of the network. This operation needs to be done at each call of 
+        forward since the contraction step at the end of forward disconnects the initial nodes.
+        """
+        #connect nodes
+        for edge in self.edges:
+            node0, node1 = edge
+            edge0 = self.network[node0].get_all_dangling()[1]
+            edge1 = self.network[node1].get_all_dangling()[1]
+            edge0 ^ edge1
 
 def connect_inputs(network, mol_graph, features, input_dim):
     """
@@ -177,14 +189,7 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim,
     network_nodes = [tn.Node(tensor, axis_names=name) for tensor, name in zip(tensor_list, axis_names)]
     network_nodes[-1].name = 'center'
     
-    #connect nodes
-    for edge in edges:
-        node0, node1 = edge
-        edge0 = network_nodes[node0].get_all_dangling()[1]
-        edge1 = network_nodes[node1].get_all_dangling()[1]
-        edge0 ^ edge1
-
-    return tensor_list, network_nodes
+    return tensor_list, network_nodes, edges
 
 def get_graph_children(graph, child_dict):
     """
@@ -451,9 +456,10 @@ if __name__ == '__main__':
     print('----------------------------')
     print('static graph tensor net test')
     tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
-    graph = dataset.__getitem__(32)['graph']
-    features = dataset.__getitem__(32)['features']
-    print(tensornet(graph,features))
+    data = dataset.__getitem__(32)
+    print(tensornet(data['graph'],data['features']))
+    data = dataset.__getitem__(33)
+    print(tensornet(data['graph'],data['features']))
 
     print('----------------------------')
     print('static graph tensor net multiple labels test')
@@ -467,6 +473,7 @@ if __name__ == '__main__':
     print('----------------------------')
     print('get_graph_children test')
 
+    print('dgl graph:')
     node = nx.Graph()
     node.add_node(1)
     branch = nx.generators.classic.balanced_tree(3,2)
@@ -482,18 +489,10 @@ if __name__ == '__main__':
     print(new_child_dict)
     assert(new_child_dict=={0: [1, 2, 3], 13: [14, 15, 16], 26: [27, 28, 29], 39: [40, 41, 42]})
 
-    print('dgl graph:')
-    tensor_list, net = all_random_diag_init(input_dim = 2, bond_dim = 2, max_degree = 4, 
-    max_depth = 4, output_dim=0, std = 1e-8)
-    child_dict = {net[-1] : list(tn.get_neighbors(net[-1]))}
-    child = get_graph_children(graph = net, child_dict=child_dict)
-    child_list = [len(ch) for ch in list(child.values())]
-    print(child_list)
-    assert( [len(ch) for ch in list(child.values())] == [3,3,3,3])
-    
     print('tensornetwork graph:')
     tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 2)
-    tensor_list, net = all_random_diag_init(input_dim=2, bond_dim=2, max_degree=4,max_depth=3,output_dim=0, std=1e-16)
+    tensornet.connect_nodes()
+    net = tensornet.network
     center = net[-1]
     assert(center.name=='center')
     child_dict = {net[-1]: tn.get_neighbors(net[-1])}
