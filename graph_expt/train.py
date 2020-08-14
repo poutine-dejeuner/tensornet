@@ -36,7 +36,8 @@ if __name__ == "__main__":
                                     max_degree = 4, 
                                     max_depth = 4, 
                                     bond_dim = 20, 
-                                    embedding_dim = 16)
+                                    embedding_dim = 16,
+                                    uniform = True)
     
     num_workers = os.cpu_count()
     regressor = MolGraphRegressor(model = model, dataset = dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 

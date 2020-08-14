@@ -11,7 +11,7 @@ from gnnfp.utils import GraphFPDataset
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.FloatTensor)
 
-class tree_Node(object):
+class tree_node(object):
     def __init__(self, data):
         self.data = data
         self.children = []
@@ -19,7 +19,7 @@ class tree_Node(object):
     def add_child(self, obj):
         self.children.append(obj)
 
-    def add_child_from_list(self, child_list):
+    def add_children_from_list(self, child_list):
         self.children = self.children + child_list
 
 class StaticGraphTensorNetwork(pl.LightningModule):
@@ -30,7 +30,8 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 max_degree = 4,
                 max_depth = 5,
                 embedding_dim = 32,
-                std = 1e-8
+                std = 1e-8,
+                uniform = False
         ):
         '''
         Parameters
@@ -50,7 +51,7 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.max_depth = max_depth
         self.input_dim = embedding_dim
         self.output_dim = len(dataset.__getitem__(0)['labels'])
-        self.uniform = True
+        self.uniform = uniform
         
         self.tensor_list, self.network, self.edges = all_random_diag_init(
             self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std, uniform = self.uniform)
@@ -90,9 +91,15 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 edge1 = self.network[node1].get_all_dangling()[1]
                 edge0 ^ edge1
         
-        elif isinstance(self.network, dict):
-            parent = list(self.network.keys())[0]
-            child
+        elif isinstance(self.network, tree_node):
+            parents = [self.network]
+            while parents != []:
+                node = parents.pop()
+                for child in node.children:
+                    edge1 = node.data.get_all_dangling()[1]
+                    edge2 = child.data.get_all_dangling()[1]
+                    edge1 ^ edge2
+                    parents = [child] + parents
 
 def connect_inputs(network, mol_graph, features, input_dim):
     """
@@ -115,37 +122,56 @@ def connect_inputs(network, mol_graph, features, input_dim):
     mol_graph = mol_graph.to_networkx()
     # first connect the input of the center of the molecule to the center of the network
     center = nx.algorithms.distance_measures.center(mol_graph)[0]
-    input_node = tn.Node(features[center])
-    input_nodes = [input_node]
-    
     mol_child_dict = {center: list(nx.neighbors(mol_graph, center))}
-    net_child_dict = {network[-1]: tn.get_neighbors(network[-1])}
-    network[-1]['input'] ^ input_node[0]
-    #this dictionary pairs atoms in mol_graph with nodes of network
-    graph_net_dict = {center:network[-1]}
-    
-    while mol_child_dict != dict():
-        #we need to get the next net_child_dict before connecting nodes otherwise the neighborhood 
-        #will contain input nodes too
-        next_net_child_dict = get_graph_children(network, net_child_dict)
-        #connect features of atoms in atom_list to network nodes
-        for parent in mol_child_dict:
-            net_parent = graph_net_dict[parent]
-            net_children = net_child_dict[net_parent]
-            for child in mol_child_dict[parent]:
-                node = None
-                for node in net_children:
-                    if node['input'].is_dangling() == True:
-                        break
-                graph_net_dict[child] = node
-                input_node = tn.Node(features[child])
-                node['input'] ^ input_node[0]
-                input_nodes.append(input_node)
-    
-        #get children of atoms in atom_list. A parent list is needed to remove them from 
-        #the neighbors to get the next iterations child list.
-        mol_child_dict = get_graph_children(mol_graph, mol_child_dict)
-        net_child_dict = next_net_child_dict
+
+    if isinstance(network, tree_node):
+        input_nodes = [tn.Node(features[center])]
+        node = network.data
+        node[0] ^ input_nodes[0][0]
+        mol_net_dict = {center: network}  
+        while mol_child_dict != dict():
+            #connect features of atoms in to the child nodes. parents have been connected in previous step
+            for parent in mol_child_dict:
+                for i, child in enumerate(mol_child_dict[parent]):
+                    input_node = tn.Node(features[child])
+                    input_nodes.append(input_node)
+                    node = mol_net_dict[parent].children[i]
+                    node.data[0] ^ input_node[0]
+                    assert(input_node.get_all_dangling()==[])
+                    #update mol_child_dict with child as new parent
+                    mol_child_dict[child] = get_graph_children(mol_graph, mol_child_dict)
+                mol_child_dict.popitem(parent)
+
+    elif isinstance(network, list):
+        input_node = tn.Node(features[center])
+        input_nodes = [input_node]
+        net_child_dict = {network[-1]: tn.get_neighbors(network[-1])}
+        network[-1]['input'] ^ input_node[0]
+        #this dictionary pairs atoms in mol_graph with nodes of network
+        graph_net_dict = {center:network[-1]}
+        
+        while mol_child_dict != dict():
+            #we need to get the next net_child_dict before connecting nodes otherwise the neighborhood 
+            #will contain input nodes too
+            next_net_child_dict = get_graph_children(network, net_child_dict)
+            #connect features of atoms in atom_list to network nodes
+            for parent in mol_child_dict:
+                net_parent = graph_net_dict[parent]
+                net_children = net_child_dict[net_parent]
+                for child in mol_child_dict[parent]:
+                    node = None
+                    for node in net_children:
+                        if node['input'].is_dangling() == True:
+                            break
+                    graph_net_dict[child] = node
+                    input_node = tn.Node(features[child])
+                    node['input'] ^ input_node[0]
+                    input_nodes.append(input_node)
+        
+            #get children of atoms in atom_list. A parent list is needed to remove them from 
+            #the neighbors to get the next iterations child list.
+            mol_child_dict = get_graph_children(mol_graph, mol_child_dict)
+            net_child_dict = next_net_child_dict
 
     dangling_edges = tn.get_all_dangling(network)
     for edge in dangling_edges:
@@ -167,6 +193,7 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim,
     Initialisation of tensors is done with utils.tensor_tree_node_init.
     The first index of the nodes is the input, the other are the bonds.
     """
+    from copy import deepcopy
     #Create the graph G for the tensor network
     node = nx.Graph()
     node.add_node(1)
@@ -206,24 +233,23 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim,
         leaf = tn.Node(tensor, name = 'leaf', axis_names = ['input','bond'])
         
         #init the regular nodes tensors
-        shape = (input_dim,) + tuple(bond_dim for i in range(degree))
+        shape = (input_dim,) + tuple(bond_dim for i in range(max_degree))
         reg_node_list = []
         for i in range(max_depth - 2):
             tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
             tensor_list.append(tensor)
-            axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree - 1)]
+            axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree)]
             node = tn.Node(tensor, name = 'node', axis_names = axis_names)
             reg_node_list.append(node)
         
-        node = reg_node_list.pop()
-        tree = tree_node(node)
-        tree.add_child_from_list()
+        tree = leaf
         for node in reg_node_list:
-            tree = { node:[tree.copy(), tree.copy(), tree.copy()]}
+            tree = tree_node(node)
+            tree.add_children_from_list( [deepcopy(tree) for i in range(max_degree -1)] )
 
         #init the root tensor
-        shape = (input_dim,) + tuple(bond_dim for i in range(degree))
-        axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree - 1)]
+        shape = (input_dim,) + tuple(bond_dim for i in range(max_degree))
+        axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree)]
         if output_dim > 1:
             shape = shape + (output_dim,)
             axis_names = axis_names + ['output']
@@ -231,8 +257,10 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim,
         tensor_list.append(tensor)
         root_node = tn.Node(tensor, name = 'root', axis_names = axis_names)
 
+        tree = tree_node(root_node)
+        tree.add_children_from_list([deepcopy(tree) for i in range(max_degree)])
+
         #TODO: make the tree dict the data used by the rest of the code for computations
-        tree = {root_node: [tree.copy(), tree.copy(), tree.copy()]}
         
         return tensor_list, tree, tree
 
@@ -510,6 +538,14 @@ if __name__ == '__main__':
     print(tensornet(data['graph'],data['features']))
 
     print('----------------------------')
+    print('uniform static graph tensor net test')
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10, uniform=True)
+    graph = dataset.__getitem__(16)['graph']
+    features = dataset.__getitem__(16)['features']
+    tensornet = StaticGraphTensorNetwork(dataset, bond_dim = 10)
+    print(tensornet(graph,features))
+
+    print('----------------------------')
     print('static graph tensor net multiple labels test')
     dataset = MolGraphDataset(data_path, features_path, num_labels=-1)
     print('num labels=' + str(len(dataset.__getitem__(16)['labels'])))
@@ -548,10 +584,6 @@ if __name__ == '__main__':
     child_list = [len(ch) for ch in child.values()]
     print(child_list)
     assert(child_list == [3,3,3,3])
-
-
-
-
 
 import opt_einsum as oe
 
