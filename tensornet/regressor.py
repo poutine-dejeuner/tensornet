@@ -289,6 +289,7 @@ class MolGraphRegressor(Regressor):
                 graph = element['graph']
                 features = element['features']
                 y = element['labels']
+                y.squeeze()
                 preds = self.model.forward(mol_graph = graph, features = features)
                 scaler = self.dataset.scaler
                 loss += self.loss_fun(preds,y)

@@ -11,6 +11,17 @@ from gnnfp.utils import GraphFPDataset
 tn.set_default_backend("pytorch")
 torch.set_default_tensor_type(torch.FloatTensor)
 
+class tree_Node(object):
+    def __init__(self, data):
+        self.data = data
+        self.children = []
+
+    def add_child(self, obj):
+        self.children.append(obj)
+
+    def add_child_from_list(self, child_list):
+        self.children = self.children + child_list
+
 class StaticGraphTensorNetwork(pl.LightningModule):
     
     def __init__(self, 
@@ -39,23 +50,19 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.max_depth = max_depth
         self.input_dim = embedding_dim
         self.output_dim = len(dataset.__getitem__(0)['labels'])
+        self.uniform = True
         
         self.tensor_list, self.network, self.edges = all_random_diag_init(
-            self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std)
+            self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std, uniform = self.uniform)
 
         self.embedding = torch.nn.Embedding(num_embeddings = dataset.vocab_len,
-                                            embedding_dim = embedding_dim
-                                            )
+                                            embedding_dim = embedding_dim)
 
     def forward(self, mol_graph, features):
         """
         makes a copy of self.network, connects the graphs feature vectors embedding mol_graph in the network 
         and puts padding vectors at all other inputs. Contracts the network.
         """
-        #tn.copy returns a tuple containing a dictionary mapping the nodes to their copies and a dictionary 
-        # mapping the edges to their copies.
-        #network = tn.copy(self.network)
-        #network = list( network[0].values() )
         network = self.network
         self.connect_nodes()
         features = self.embedding(features)
@@ -68,9 +75,6 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                     network.remove(edge.node2)
                     new_node = tn.contract(edge)
                     network.append(new_node)
-                    #for debugging the mysterious zero product
-                    #norm_list=[torch.norm(node.tensor) for node in network]
-                    #print('min,max='+str(min(norm_list))+str(max(norm_list)))
 
         return network[0].tensor
 
@@ -79,12 +83,16 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         Connects the core nodes of the network. This operation needs to be done at each call of 
         forward since the contraction step at the end of forward disconnects the initial nodes.
         """
-        #connect nodes
-        for edge in self.edges:
-            node0, node1 = edge
-            edge0 = self.network[node0].get_all_dangling()[1]
-            edge1 = self.network[node1].get_all_dangling()[1]
-            edge0 ^ edge1
+        if isinstance(self.network, list):
+            for edge in self.edges:
+                node0, node1 = edge
+                edge0 = self.network[node0].get_all_dangling()[1]
+                edge1 = self.network[node1].get_all_dangling()[1]
+                edge0 ^ edge1
+        
+        elif isinstance(self.network, dict):
+            parent = list(self.network.keys())[0]
+            child
 
 def connect_inputs(network, mol_graph, features, input_dim):
     """
@@ -153,7 +161,7 @@ def connect_inputs(network, mol_graph, features, input_dim):
     network = network + input_nodes
     return network
 
-def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim, std):
+def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim, std, uniform):
     """
     Initialises the tensors of the network and connects them, leaving the input edges free. 
     Initialisation of tensors is done with utils.tensor_tree_node_init.
@@ -172,23 +180,63 @@ def all_random_diag_init(input_dim, bond_dim, max_degree, max_depth, output_dim,
     G.add_edges_from([(0,4*size), (size, 4*size), (2*size,4*size), (3*size,4*size)])
     edges = list(G.edges())
     assert(nx.algorithms.components.is_connected(G)==True)
-
-    #init core tensors and create Tensornetworks Nodes
     tensor_list = torch.nn.ParameterList()
-    for node in G.nodes():
-        degree = G.degree(node)
-        shape = (input_dim,) + tuple(bond_dim for i in range(degree))
+
+    if uniform == False:
+        #init core tensors and create Tensornetworks Nodes
+        for node in G.nodes():
+            degree = G.degree(node)
+            shape = (input_dim,) + tuple(bond_dim for i in range(degree))
+            tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
+            tensor_list.append(tensor)
+        axis_names = [ ['input']+['bond'+str(i) for i in range(len(tensor.shape) - 1)] for tensor in tensor_list ]
+        if output_dim>1:
+            shape = (input_dim,) + tuple(bond_dim for i in range(degree)) + (output_dim,)
+            tensor_list[-1] = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
+            axis_names[-1] = ['input']+['bond'+str(i) for i in range(max_degree)] + ['output']
+        
+        network_nodes = [tn.Node(tensor, axis_names=name) for tensor, name in zip(tensor_list, axis_names)]
+        network_nodes[-1].name = 'center'
+    
+    elif uniform == True:
+        #init the leaf tensor
+        shape = (input_dim, bond_dim)
         tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
         tensor_list.append(tensor)
-    axis_names = [ ['input']+['bond'+str(i) for i in range(len(tensor.shape) - 1)] for tensor in tensor_list ]
-    if output_dim>1:
-        shape = (input_dim,) + tuple(bond_dim for i in range(degree)) + (output_dim,)
-        tensor_list[-1] = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
-        axis_names[-1] = ['input']+['bond'+str(i) for i in range(max_degree)] + ['output']
-    
-    network_nodes = [tn.Node(tensor, axis_names=name) for tensor, name in zip(tensor_list, axis_names)]
-    network_nodes[-1].name = 'center'
-    
+        leaf = tn.Node(tensor, name = 'leaf', axis_names = ['input','bond'])
+        
+        #init the regular nodes tensors
+        shape = (input_dim,) + tuple(bond_dim for i in range(degree))
+        reg_node_list = []
+        for i in range(max_depth - 2):
+            tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
+            tensor_list.append(tensor)
+            axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree - 1)]
+            node = tn.Node(tensor, name = 'node', axis_names = axis_names)
+            reg_node_list.append(node)
+        
+        node = reg_node_list.pop()
+        tree = tree_node(node)
+        tree.add_child_from_list()
+        for node in reg_node_list:
+            tree = { node:[tree.copy(), tree.copy(), tree.copy()]}
+
+        #init the root tensor
+        shape = (input_dim,) + tuple(bond_dim for i in range(degree))
+        axis_names = ['input'] + ['bond'+str(i) for i in range(max_degree - 1)]
+        if output_dim > 1:
+            shape = shape + (output_dim,)
+            axis_names = axis_names + ['output']
+        tensor = torch.nn.Parameter(tensor_tree_node_init(shape, std=std))
+        tensor_list.append(tensor)
+        root_node = tn.Node(tensor, name = 'root', axis_names = axis_names)
+
+        #TODO: make the tree dict the data used by the rest of the code for computations
+        tree = {root_node: [tree.copy(), tree.copy(), tree.copy()]}
+        
+        return tensor_list, tree, tree
+
+                        
     return tensor_list, network_nodes, edges
 
 def get_graph_children(graph, child_dict):

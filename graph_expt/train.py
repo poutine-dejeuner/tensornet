@@ -35,7 +35,7 @@ if __name__ == "__main__":
     model = StaticGraphTensorNetwork(dataset = dataset, 
                                     max_degree = 4, 
                                     max_depth = 4, 
-                                    bond_dim = 10, 
+                                    bond_dim = 20, 
                                     embedding_dim = 16)
     
     num_workers = os.cpu_count()
