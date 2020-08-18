@@ -68,6 +68,8 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.connect_nodes()
         features = self.embedding(features)
         network = connect_inputs(network, mol_graph, features, self.input_dim)
+        network = list(tn.reachable(network[0]))
+        #TODO: URGENT: Faire un contracteur parallélisable
         while len(network)>1:
             for node in network:
                 if len(node.tensor.shape)==1:
@@ -100,7 +102,6 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                     edge2 = child.data.get_all_dangling()[1]
                     edge1 ^ edge2
                     parents = [child] + parents
-            print( 'yo')
 
 def connect_inputs(network, mol_graph, features, input_dim):
     """
@@ -157,7 +158,6 @@ def connect_inputs(network, mol_graph, features, input_dim):
             input_nodes.append(padding_node)
         #network = network + input_nodes
         return network
-
 
     elif isinstance(network, list):
         input_node = tn.Node(features[center])
