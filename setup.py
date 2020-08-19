@@ -42,7 +42,7 @@ setup(
     #            'Windows'],            # Valid platforms your code works on, adjust to your flavor
     python_requires=">=3.5",
     install_requires=['numpy', 'pandas', 'torch', 'torchvision',
-                        'tensorboardX', 'tensorflow']  # Python version restrictions
+                        'tensorboardX']  # Python version restrictions
 # 'rdkit', 'PIL'
     # Manual control if final package is compressible or not, set False to prevent the .egg from being made
     # zip_safe=False,

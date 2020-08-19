@@ -31,7 +31,8 @@ class StaticGraphTensorNetwork(pl.LightningModule):
                 max_depth = 5,
                 embedding_dim = 32,
                 std = 1e-8,
-                uniform = False
+                uniform = False,
+                device
         ):
         '''
         Parameters
@@ -52,12 +53,14 @@ class StaticGraphTensorNetwork(pl.LightningModule):
         self.input_dim = embedding_dim
         self.output_dim = len(dataset.__getitem__(0)['labels'])
         self.uniform = uniform
+        self.device = device
         
         self.tensor_list, self.network, self.edges = all_random_diag_init(
             self.input_dim, bond_dim, max_degree, max_depth, self.output_dim, std, uniform = self.uniform)
 
         self.embedding = torch.nn.Embedding(num_embeddings = dataset.vocab_len,
                                             embedding_dim = embedding_dim)
+        self.tensor_list.to(self.device)
 
     def forward(self, mol_graph, features):
         """

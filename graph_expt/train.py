@@ -19,8 +19,10 @@ if __name__ == "__main__":
     
     if torch.cuda.is_available():
         gpus = 1
+        device = 'cuda:0'
     else:
         gpus = None
+        device = 'cpu'
 
     scaler = TorchScalerWrapper(StandardScaler())
     name = 'data/qm9_80'
@@ -37,12 +39,19 @@ if __name__ == "__main__":
                                     max_depth = 4, 
                                     bond_dim = 20, 
                                     embedding_dim = 16,
-                                    uniform = True)
+                                    uniform = True,
+                                    device = device)
     
     num_workers = os.cpu_count()
-    regressor = MolGraphRegressor(model = model, dataset = dataset, loss_fun = torch.nn.MSELoss(reduction='sum'), 
-                lr = 1e-4, batch_size = 16, validation_split = 0.2, random_seed = RANDOM_SEED, 
-                num_workers = num_workers, dtype = DTYPE, weight_decay = 1)
+    regressor = MolGraphRegressor(model = model, 
+                                dataset = dataset, 
+                                loss_fun = torch.nn.MSELoss(reduction='sum'), 
+                                lr = 1e-4, batch_size = 16, 
+                                validation_split = 0.2, 
+                                random_seed = RANDOM_SEED, 
+                                num_workers = num_workers, 
+                                dtype = DTYPE, 
+                                weight_decay = 0)
 
     #profiler = pl.profiler.AdvancedProfiler()
     profiler = None
